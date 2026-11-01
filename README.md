@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.0.3
+# Grafia Questions — versão 1.0.4
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -39,7 +39,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 - **Pacote de questões:** exporta um JSON e, quando necessário, um ZIP opcional de imagens.
 - **Restauração completa:** permite mesclar ou substituir. A substituição dispara antes o download de um backup de segurança e grava os dados em uma transação IndexedDB. Depois de criar qualquer backup, confirme que o arquivo foi salvo antes de avançar o checkpoint incremental; sem essa confirmação, as alterações continuam incluídas no próximo backup.
 
-## Limites conhecidos da versão 1.0.3
+## Limites conhecidos da versão 1.0.4
 
 - A estimativa de proficiência inspirada na TRI é experimental e só aparece com parâmetros `a`, `b` e `c` fornecidos no pacote; não é uma nota oficial do ENEM.
 - A estimativa não deve ser interpretada sem calibração empírica dos parâmetros.
@@ -51,7 +51,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.0.3.md` para os ajustes desta versão.
+Consulte `CHANGELOG_v1.0.4.md` para os ajustes desta versão.
 
 ## Estrutura do projeto
 
@@ -72,18 +72,17 @@ MODELO_PACOTE.json
 SCHEMA_PACOTE.md
 AUDITORIA_GRAFIA_QUESTIONS_v1.0.1.md
 CHANGELOG_v1.0.3.md
+CHANGELOG_v1.0.4.md
 README.md
 ```
 
-## Atualização 1.0.3
+## Atualização 1.0.4
 
-- Links encontrados no texto são apresentados como chips clicáveis e destacados.
-- Fontes e referências aparecem em cartões separados do enunciado na prévia do banco, durante a resolução, nos resultados e na visualização completa da questão.
-- A origem externa de uma imagem aparece junto à própria imagem, sem se confundir com a legenda; os metadados são preservados ao mesclar importações.
-- A navegação inferior contém apenas os seis rótulos, sem ícones ou bolinhas no menu; o símbolo circular repetido na tela vazia de Desempenho também foi substituído.
-- A limpeza do cache offline é limitada ao caminho desta instalação para não afetar outros aplicativos no mesmo domínio.
-- A identidade do app é Grafia Questions; o esquema JSON de importação e a estrutura interna de dados foram mantidos para compatibilidade.
-- O pacote não inclui questões fictícias.
+- Os seis itens da navegação voltaram a exibir ícones vetoriais próprios.
+- O marcador flutuante separado da barra de navegação foi removido; a área ativa é sinalizada no próprio item.
+- O histórico registra os IDs das questões de cada pacote importado e oferece **Criar atividade** para resolver esse conjunto posteriormente.
+- A atividade usa os IDs já existentes no banco, sem importar ou duplicar questões novamente.
+- Registros antigos sem associação de IDs informam que é necessário reimportar o pacote para habilitar a ação.
 
 ## Publicar em outra conta do GitHub
 
@@ -94,3 +93,12 @@ Este ZIP é um pacote independente para um repositório novo. Extraia os arquivo
 - As fontes e referências da questão também aparecem separadas do enunciado na prévia do banco, durante a resolução e nos resultados.
 - A origem externa das imagens continua visível junto à imagem; ao mesclar uma questão já existente, os metadados de origem da imagem são preservados quando o novo pacote não os informa.
 - A limpeza do cache offline agora é limitada ao caminho desta instalação do Grafia Questions, sem apagar caches de outros aplicativos publicados sob o mesmo domínio.
+
+
+## Histórico de importações e atividades
+
+As importações feitas nesta versão guardam a relação de IDs das questões que vieram em cada pacote. Em **Configurações → Histórico → Criar atividade**, você pode transformar novamente aquele pacote em uma atividade de resolução, inclusive dias depois, sem importar as questões outra vez. O botão não aparece para registros antigos que não tenham essa relação salva; nesses casos, reimporte o mesmo pacote uma vez para habilitar a função. Só pode haver uma atividade em andamento por vez.
+
+## Navegação 1.0.4
+
+A barra inferior voltou a exibir ícones próprios para as seis áreas. O indicador flutuante que aparecia separado da barra foi eliminado; o estado ativo é indicado dentro do próprio item.
