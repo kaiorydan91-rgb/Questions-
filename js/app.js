@@ -4,6 +4,8 @@ import { readZip, writeZip, downloadBlob } from './zip.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+// Remove obsolete floating navigation markers left by older interface builds.
+document.querySelectorAll('.nav-indicator, .nav-bubble, .nav-orb, .navigation-indicator, .floating-nav-indicator, .nav-active-indicator, .nav-marker, .active-nav-marker, .nav-active-marker, #navIndicator, #navBubble, #navMarker, [data-nav-indicator], [data-nav-bubble], [data-nav-marker]').forEach(element => element.remove());
 const nowISO = () => new Date().toISOString();
 const makeId = prefix => `${prefix}-${crypto.randomUUID()}`;
 const STORES = ['questions', 'assets', 'assetBlobs', 'textBases', 'activities', 'answers', 'reviews', 'notes', 'collections', 'settings', 'imports', 'aliases', 'changes'];
@@ -689,9 +691,21 @@ async function renderSettings() {
   const persisted = await navigator.storage?.persisted?.().catch(() => false);
   const usage = estimate?.usage ?? null; const quota = estimate?.quota ?? null;
   $('#storageDiagnostics').innerHTML = `<div class="diagnostic-row"><span>Questões</span><b>${counts.questions}</b></div><div class="diagnostic-row"><span>Imagens e arquivos</span><b>${counts.assets}</b></div><div class="diagnostic-row"><span>Atividades</span><b>${counts.activities}</b></div><div class="diagnostic-row"><span>Respostas registradas</span><b>${counts.answers}</b></div><div class="diagnostic-row"><span>Revisões</span><b>${counts.reviews}</b></div><div class="diagnostic-row"><span>Espaço utilizado pelo navegador</span><b>${usage == null ? 'Não informado' : formatBytes(usage)}</b></div><div class="diagnostic-row"><span>Limite estimado</span><b>${quota == null ? 'Não informado' : formatBytes(quota)}</b></div><div class="diagnostic-row"><span>Armazenamento persistente</span><b>${persisted ? 'Concedido' : 'Não concedido'}</b></div>`;
-  const imports = [...state.data.imports].sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)).slice(0,12);
+  const imports = [...state.data.imports].sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)).slice(0,20);
   $('#importHistoryEmpty').classList.toggle('hidden', imports.length > 0);
-  $('#importHistory').innerHTML = imports.map(item => `<div class="history-row"><span><b>${escapeHTML(item.packageName || item.fileName || 'Operação')}</b><small>${formatDate(item.createdAt, true)} · ${escapeHTML(item.operation || 'Importação')} · ${item.importedCount ?? 0} questões</small></span><span class="tag peach">${escapeHTML(item.status || 'Concluída')}</span></div>`).join('');
+  $('#importHistory').innerHTML = imports.map(item => {
+    const ids = importRecordQuestionIds(item);
+    const total = Number(item.packageQuestionCount) || ids.length || Number(item.importedCount) || 0;
+    const canCreate = ids.length > 0 && ['Concluída', 'Parcial'].includes(item.status || 'Concluída');
+    const unavailable = !ids.length ? '<small class="import-history-note">Este registro é de uma versão anterior e não contém a associação das questões. Reimporte o pacote para habilitar a criação da atividade.</small>' : '';
+    return `<div class="history-row import-history-row"><div class="import-history-main"><b>${escapeHTML(item.packageName || item.fileName || 'Operação')}</b><small>${formatDate(item.createdAt, true)} · ${escapeHTML(item.operation || 'Importação')} · ${total} questões no pacote</small>${unavailable}</div><div class="import-history-actions"><span class="tag peach">${escapeHTML(item.status || 'Concluída')}</span>${canCreate ? `<button class="button primary" type="button" data-action="create-activity-from-import" data-id="${safeAttr(item.id)}">Criar atividade ↗</button>` : ''}</div></div>`;
+  }).join('');
+}
+function importRecordQuestionIds(item) {
+  const direct = Array.isArray(item?.questionIds) ? item.questionIds : [];
+  const sourceExam = state.data.collections.find(collection => collection.type === 'sourceExam' && collection.packageId === item?.packageId);
+  const fallback = sourceExam?.originalOrder?.length ? sourceExam.originalOrder : (sourceExam?.questionIds || []);
+  return [...new Set((direct.length ? direct : fallback).filter(id => Boolean(questionById(id))))];
 }
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return '—';
@@ -874,7 +888,8 @@ async function commitImport() {
     newQuestionIds.push(existing.id);
     incomingToFinalId.set(incoming.id, existing.id);
   }
-  const importRecord = { id: makeId('import'), packageId: draft.packageId, packageName: draft.packageName, fileName: draft.fileName, imageFileName: draft.imageFileName, operation: draft.mode === 'solve' ? 'Importar e resolver' : 'Importação de questões', importedCount: questionsToWrite.length, status: 'Concluída', createdAt: nowISO(), updatedAt: nowISO() };
+  const packageQuestionIds = [...new Set(newQuestionIds)];
+  const importRecord = { id: makeId('import'), packageId: draft.packageId, packageName: draft.packageName, fileName: draft.fileName, imageFileName: draft.imageFileName, operation: draft.mode === 'solve' ? 'Importar e resolver' : 'Importação de questões', importedCount: questionsToWrite.length, packageQuestionCount: packageQuestionIds.length, questionIds: packageQuestionIds, status: 'Concluída', createdAt: nowISO(), updatedAt: nowISO() };
   const usedAssetIds = new Set(draft.questions.flatMap(q => (q.images || []).map(image => image.assetId)));
   const usedAssets = draft.assets.filter(asset => usedAssetIds.has(asset.id));
   const usedAssetIdsForBlobs = new Set(usedAssets.map(asset => asset.id));
@@ -1318,6 +1333,15 @@ document.addEventListener('click', async event => {
     else if (action === 'back-import-preview') { closeModal(); openImportModalShellForDraft(); renderImportPreview(); }
     else if (action === 'save-import-question') saveImportQuestion(actionButton.dataset.id);
     else if (action === 'commit-import') await commitImport();
+    else if (action === 'create-activity-from-import') {
+      const importedPackage = state.data.imports.find(item => item.id === actionButton.dataset.id);
+      const ids = importedPackage ? importRecordQuestionIds(importedPackage) : [];
+      if (!ids.length) toast('Nenhuma questão desse pacote está disponível no banco. Reimporte o pacote para continuar.');
+      else {
+        const title = `Pacote · ${importedPackage.packageName || importedPackage.fileName || 'Questões importadas'}`;
+        await createActivityFromIds(ids, title);
+      }
+    }
     else if (action === 'favorite') { closeModal(); await toggleFavorite(actionButton.dataset.id); }
     else if (action === 'question-review') { closeModal(); await addReview(actionButton.dataset.id); }
     else if (action === 'edit-question') openEditQuestion(actionButton.dataset.id);
