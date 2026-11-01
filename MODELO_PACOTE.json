@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0.0",
+  "packageId": "identificador-unico-do-pacote",
+  "packageName": "Nome do pacote",
+  "generatedAt": "2026-11-01T00:00:00.000Z",
+  "source": {
+    "name": "",
+    "exam": "",
+    "year": null
+  },
+  "textBases": [],
+  "questions": []
+}
