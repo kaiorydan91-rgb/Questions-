@@ -75,12 +75,13 @@ CHANGELOG_v1.0.3.md
 CHANGELOG_v1.0.4.md
 CHANGELOG_v1.1.0.md
 CHANGELOG_v1.3.0.md
+CHANGELOG_v1.4.0.md
 README.md
 ```
 
 ## Atualização 1.1.0 (histórico)
 
-A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base.
+A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente.
 
 ## Atualização 1.0.4
 
@@ -112,8 +113,16 @@ A barra inferior voltou a exibir ícones próprios para as seis áreas. O indica
 
 ## v1.3.0
 
-- Seletor de assuntos usa os 100 tópicos do Grafia Study e os assuntos já importados, filtrados pelas matérias escolhidas, com busca e entrada personalizada.
+- Seletor de assuntos usa a lista-base de 100 tópicos do Grafia Study, filtrada pelas matérias escolhidas, com busca e entrada personalizada.
 - Alternativas podem ser escurecidas por pressão longa de 1 segundo; não há mais botão de riscar nem texto tachado.
 - Comentário da alternativa selecionada aparece antes da resolução completa.
 - Grifos abrangem enunciado e texto-base e continuam salvos na atividade e no resultado.
 - A estimativa de proficiência usa MAP regularizado com parâmetros `a`, `b` e `c` calibrados. O diagnóstico separado de coerência por dificuldade não é uma nota TRI.
+
+
+## v1.4.0
+
+- O catálogo do seletor de atividades passa a exibir exclusivamente os 100 assuntos fixos do Grafia Study e assuntos personalizados que o usuário salvou manualmente.
+- Questões importadas deixam de cadastrar ou acrescentar assuntos ao catálogo.
+- A busca permite salvar uma expressão nova como assunto personalizado, mantendo-a no armazenamento local e nos backups.
+- Registros antigos gerados automaticamente a partir das questões são removidos na primeira atualização, sem apagar questões, respostas ou atividades.
