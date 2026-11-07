@@ -74,13 +74,13 @@ AUDITORIA_GRAFIA_QUESTIONS_v1.0.1.md
 CHANGELOG_v1.0.3.md
 CHANGELOG_v1.0.4.md
 CHANGELOG_v1.1.0.md
-CHANGELOG_v1.2.0.md
+CHANGELOG_v1.3.0.md
 README.md
 ```
 
 ## Atualização 1.1.0 (histórico)
 
-A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.2.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base.
+A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base.
 
 ## Atualização 1.0.4
 
@@ -110,7 +110,7 @@ As importações feitas nesta versão guardam a relação de IDs das questões q
 A barra inferior voltou a exibir ícones próprios para as seis áreas. O indicador flutuante que aparecia separado da barra foi eliminado; o estado ativo é indicado dentro do próprio item.
 
 
-## v1.2.0
+## v1.3.0
 
 - Seletor de assuntos usa os 100 tópicos do Grafia Study e os assuntos já importados, filtrados pelas matérias escolhidas, com busca e entrada personalizada.
 - Alternativas podem ser escurecidas por pressão longa de 1 segundo; não há mais botão de riscar nem texto tachado.

@@ -1,160 +1,144 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#16182F">
-  <meta name="description" content="Grafia Questions — banco pessoal de questões, atividades e análise de aprendizagem.">
-  <meta name="application-name" content="Grafia Questions">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="icon" href="./icons/icon-192.png" sizes="192x192">
-  <link rel="apple-touch-icon" href="./icons/icon-192.png">
-  <link rel="stylesheet" href="./css/app.css">
-  <title>Grafia Questions</title>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
+<meta content="#16182F" name="theme-color"/>
+<meta content="Grafia Questions" name="description"/>
+<meta content="Grafia Questions" name="application-name"/>
+<meta content="yes" name="apple-mobile-web-app-capable"/>
+<meta content="black-translucent" name="apple-mobile-web-app-status-bar-style"/>
+<link href="./manifest.webmanifest" rel="manifest"/>
+<link href="./icons/icon-192.png" rel="icon" sizes="192x192"/>
+<link href="./icons/icon-192.png" rel="apple-touch-icon"/>
+<link href="./css/app.css" rel="stylesheet"/>
+<title>Grafia Questions</title>
 </head>
 <body>
-  <div id="app-root">
-    <div class="ambient ambient-one" aria-hidden="true"></div>
-    <div class="ambient ambient-two" aria-hidden="true"></div>
-    <div class="app-shell">
-      <header class="topbar">
-        <a class="brand" href="#inicio" data-page="home" aria-label="Grafia Questions — Início">
-          <span class="brand-mark">G</span>
-          <span class="brand-copy"><strong>Grafia Questions</strong><small>Seu acervo de aprendizagem</small></span>
-        </a>
-        <div class="topbar-right">
-          <span class="today-label" id="todayLabel"></span>
-          <button class="icon-button" type="button" data-action="open-settings" aria-label="Abrir configurações" title="Configurações">⚙</button>
-        </div>
-      </header>
-
-      <main id="mainContent" tabindex="-1">
-        <section class="page active" id="page-home" data-page-id="home">
-          <div class="page-heading"><div><div class="eyebrow">VISÃO GERAL</div><h1>Seu espaço de questões.</h1><p class="lead">Um acervo organizado para praticar, revisar e acompanhar seu domínio dos conteúdos.</p></div><span class="heading-orbit" aria-hidden="true"></span></div>
-          <div class="home-grid">
-            <article class="glass-card hero-card">
-              <div class="hero-topline"><span class="eyebrow">SEU ACERVO</span><span class="status-dot"><i></i> Armazenamento local</span></div>
-              <div class="hero-empty" id="homeEmpty">
-                <div class="empty-illustration" aria-hidden="true"><span class="empty-sheet sheet-back"></span><span class="empty-sheet sheet-front"><b>＋</b></span></div>
-                <div><h2>Seu banco ainda está vazio</h2><p>Importe seu primeiro pacote de questões para começar. Nenhuma questão de demonstração foi adicionada.</p><button class="button primary" type="button" data-action="open-import">Importar questões <span>↗</span></button></div>
-              </div>
-              <div class="hero-populated hidden" id="homePopulated">
-                <h2>Seu acervo está pronto para crescer.</h2><p>Continue adicionando questões ou monte uma atividade com os conteúdos já importados.</p>
-                <div class="metric-row"><div class="metric"><strong id="homeQuestionCount">0</strong><span>questões no banco</span></div><div class="metric"><strong id="homeActivityCount">0</strong><span>atividades concluídas</span></div><div class="metric"><strong id="homeAccuracy">—</strong><span>taxa de acerto</span></div></div>
-                <div class="hero-actions"><button class="button primary" data-page="activity" type="button">Montar atividade</button><button class="button secondary" data-action="open-import" type="button">Adicionar questões</button></div>
-              </div>
-            </article>
-            <article class="glass-card overview-card"><div class="card-heading"><div><div class="eyebrow">ACOMPANHAMENTO</div><h2>Seu desempenho</h2></div></div><div id="homePerformance" class="empty-inline"><span class="empty-symbol">⌁</span><b>Ainda não há resultados</b><p>Depois das primeiras atividades, seu progresso aparecerá aqui.</p></div><div id="homePerformanceData" class="hidden"></div></article>
-          </div>
-          <div class="section-title"><div><div class="eyebrow">ORGANIZAÇÃO</div><h2>Áreas de conhecimento</h2></div><span class="subtle-label" id="areaQuestionTotal">0 questões</span></div>
-          <div class="area-grid" id="homeAreas">
-            <button class="area-card" data-filter-area="Linguagens"><span class="area-mark">文</span><span><b>Linguagens</b><small>Português, Literatura, Inglês, Espanhol, Artes e Educação Física</small></span><strong>0</strong></button>
-            <button class="area-card" data-filter-area="Ciências Humanas"><span class="area-mark">⌂</span><span><b>Ciências Humanas</b><small>História, Geografia, Filosofia e Sociologia</small></span><strong>0</strong></button>
-            <button class="area-card" data-filter-area="Ciências da Natureza"><span class="area-mark">✳</span><span><b>Ciências da Natureza</b><small>Biologia, Química e Física</small></span><strong>0</strong></button>
-            <button class="area-card" data-filter-area="Exatas"><span class="area-mark">∑</span><span><b>Exatas</b><small>Matemática e conteúdos relacionados</small></span><strong>0</strong></button>
-          </div>
-          <div class="section-title"><div><div class="eyebrow">ACESSO RÁPIDO</div><h2>Continue por aqui</h2></div></div>
-          <div class="shortcut-grid">
-            <button class="shortcut-card" data-page="bank"><span class="shortcut-icon">▤</span><b>Explorar banco</b><small>Pesquisar e filtrar questões</small><span class="arrow">↗</span></button>
-            <button class="shortcut-card" data-page="activity"><span class="shortcut-icon">▦</span><b>Montar atividade</b><small>Criar uma lista personalizada</small><span class="arrow">↗</span></button>
-            <button class="shortcut-card" data-page="reviews"><span class="shortcut-icon">↻</span><b>Revisões</b><small>Retomar questões e conteúdos</small><span class="arrow">↗</span></button>
-          </div>
-        </section>
-
-        <section class="page" id="page-bank" data-page-id="bank">
-          <div class="page-heading"><div><div class="eyebrow">ACERVO PESSOAL</div><h1>Banco de questões.</h1><p class="lead">Encontre questões por área, matéria, assunto, dificuldade ou origem.</p></div><button class="button primary heading-button" data-action="open-import">＋ Importar</button></div>
-          <div class="glass-card bank-tools">
-            <label class="search-field"><span>⌕</span><input id="bankSearch" type="search" placeholder="Buscar no enunciado, assunto ou código…" autocomplete="off"></label>
-            <div class="filter-grid"><label><span>Área</span><select id="filterArea"><option value="">Todas as áreas</option><option>Linguagens</option><option>Ciências Humanas</option><option>Ciências da Natureza</option><option>Exatas</option></select></label><label><span>Matéria</span><select id="filterSubject"><option value="">Todas as matérias</option></select></label><label><span>Dificuldade</span><select id="filterDifficulty"><option value="">Todas</option><option value="Fácil">Fácil</option><option value="Média">Média</option><option value="Difícil">Difícil</option></select></label><label><span>Tipo</span><select id="filterType"><option value="">Todos os tipos</option><option value="multiple_choice">Múltipla escolha</option><option value="true_false">Verdadeiro ou falso</option><option value="assertion_set">Múltiplas afirmações</option></select></label></div>
-            <div class="bank-toolbar"><span id="bankCount" class="subtle-label">0 questões</span><label class="check-inline"><input type="checkbox" id="onlyFavorites"> Apenas favoritas</label><button class="text-button" id="clearFilters" type="button">Limpar filtros</button></div>
-          </div>
-          <div id="bankList" class="question-list"></div>
-          <div id="bankPagination" class="bank-pagination"></div>
-          <div id="bankEmpty" class="glass-card empty-state"><span class="empty-symbol large">▤</span><h2>O banco ainda não tem questões</h2><p>Importe o arquivo de dados preparado para o Grafia Questions. Se houver imagens, selecione também o arquivo ZIP correspondente.</p><button class="button primary" data-action="open-import">Importar primeiro pacote</button></div>
-        </section>
-
-        <section class="page" id="page-activity" data-page-id="activity">
-          <div class="page-heading"><div><div class="eyebrow">PRÁTICA PERSONALIZADA</div><h1>Montar atividade.</h1><p class="lead">Combine conteúdos, quantidade e regras de correção. Só serão usadas questões que já existem no seu banco.</p></div></div>
-          <div class="activity-layout">
-            <div class="glass-card builder-card">
-              <div class="card-heading"><div><div class="eyebrow">01 / CONTEÚDO</div><h2>Escolha o que praticar</h2></div></div>
-              <div class="field-grid activity-content-filters">
-                <div class="full-field"><span class="field-title">Áreas de conhecimento</span><div id="activityAreaFilters" class="filter-chip-grid" aria-label="Selecionar áreas de conhecimento"></div><small class="fine-print">Você pode combinar várias áreas e matérias na mesma atividade.</small></div>
-                <div class="full-field"><span class="field-title">Matérias</span><div id="activitySubjectFilters" class="filter-chip-grid subject-filter-grid" aria-label="Selecionar matérias"></div></div>
-                <div class="full-field"><span class="field-title">Assuntos</span><div class="topic-picker-heading"><button class="button secondary" id="toggleActivityTopicPicker" type="button" aria-expanded="false">Selecionar assuntos</button><span id="activityTopicSummary" class="fine-print">Nenhum assunto selecionado</span></div><div id="activityTopicPicker" class="topic-picker-panel hidden"><label class="search-field topic-search"><span>⌕</span><input id="activityTopicSearch" type="search" placeholder="Buscar nos 100 assuntos e no banco…" autocomplete="off"></label><div id="activityTopicList" class="topic-choice-list"></div><div class="topic-custom"><input id="activityTopicCustom" type="text" placeholder="Ou digite um assunto personalizado"><button class="button secondary" id="addActivityTopic" type="button">Adicionar</button></div><small class="fine-print">A lista acompanha as matérias selecionadas. Você também pode procurar ou cadastrar outros assuntos.</small></div><div id="selectedActivityTopics" class="selected-topic-list"></div></div>
-                <label><span>Dificuldade</span><select id="activityDifficulty"><option value="">Todas</option><option>Fácil</option><option>Média</option><option>Difícil</option></select></label>
-                <label><span>Estratégia</span><select id="activityStrategy"><option value="random">Aleatória</option><option value="balanced">Distribuição equilibrada</option><option value="weakness">Priorizar dificuldades</option><option value="review">Priorizar revisões pendentes</option></select></label>
-              </div>
-              <div class="field-block"><span class="field-title">Quantidade de questões</span><div class="choice-pills" id="questionAmount"><button type="button" data-value="10" class="selected">10</button><button type="button" data-value="15">15</button><button type="button" data-value="20">20</button><button type="button" data-value="30">30</button><button type="button" data-value="50">50</button><button type="button" data-value="custom">Personalizar</button></div><label class="custom-amount hidden" id="customAmountWrap"><span>Quantidade personalizada</span><input type="number" id="customAmount" min="1" max="500" value="12"></label></div>
-              <div class="field-block"><span class="field-title">Elegibilidade</span><label class="check-row"><input type="checkbox" id="includeSolved" checked><span><b>Incluir questões já resolvidas</b><small>Questões permanecem disponíveis para novas atividades.</small></span></label></div>
-            </div>
-            <div class="glass-card builder-card">
-              <div class="card-heading"><div><div class="eyebrow">02 / EXPERIÊNCIA</div><h2>Personalize a correção</h2></div></div>
-              <div class="setting-list">
-                <label class="setting-row"><span><b>Momento da correção</b><small>Defina quando o gabarito será revelado.</small></span><select id="correctionMode"><option value="end">Somente ao final</option><option value="immediate">Após cada questão</option></select></label>
-                <label class="setting-row"><span><b>Mostrar erros durante a atividade</b><small>Quando desativado, os erros aparecem apenas no resultado.</small></span><input type="checkbox" id="showErrors" class="switch-input"></label>
-                <label class="setting-row"><span><b>Exibir comentários</b><small>Mostrar resoluções quando estiverem disponíveis.</small></span><select id="commentMode"><option value="available">Quando disponíveis</option><option value="result">Somente no resultado</option><option value="hidden">Não exibir durante a resolução</option></select></label>
-                <label class="setting-row"><span><b>Navegação</b><small>Você pode voltar e alterar respostas.</small></span><select id="navigationMode"><option value="free">Livre</option><option value="sequential">Sequencial</option></select></label>
-                <label class="setting-row"><span><b>Cronômetro</b><small>Contagem de tempo da atividade.</small></span><input type="checkbox" id="timerEnabled" class="switch-input"></label>
-                <label class="setting-row" id="timerDurationRow"><span><b>Tempo disponível</b><small>Minutos para concluir a atividade.</small></span><input type="number" id="timerMinutes" min="1" max="600" value="90" class="compact-number" disabled></label>
-                <label class="setting-row"><span><b>Pontuação negativa</b><small>Em questões de resposta única, o erro pode descontar pontos.</small></span><input type="checkbox" id="negativeScoring" class="switch-input"></label>
-              </div>
-              <div class="builder-footer"><div><span class="eyebrow">DISPONIBILIDADE</span><strong id="eligibleCount">0 questões elegíveis</strong><small id="eligibleHint">Importe questões para liberar a criação.</small></div><button class="button primary" id="createActivity" type="button" disabled>Criar atividade ↗</button></div>
-            </div>
-          </div>
-          <div id="activityNoQuestions" class="glass-card empty-inline wide-empty"><span class="empty-symbol">▦</span><b>Não há questões para montar uma atividade</b><p>Primeiro, importe um pacote para o banco. As quantidades sugeridas serão ajustadas automaticamente ao acervo disponível.</p><button class="button secondary" data-action="open-import">Importar questões</button></div>
-          <div id="activitySession" class="hidden"></div>
-        </section>
-
-        <section class="page" id="page-performance" data-page-id="performance">
-          <div class="page-heading"><div><div class="eyebrow">INTELIGÊNCIA DE DESEMPENHO</div><h1>Seu progresso.</h1><p class="lead">Indicadores calculados a partir das suas respostas e atividades registradas neste dispositivo.</p></div></div>
-          <div id="performanceEmpty" class="glass-card empty-state"><span class="empty-symbol large">▥</span><h2>Seus indicadores ainda estão em formação</h2><p>Depois de resolver algumas questões, você verá taxas de acerto, evolução e pontos de atenção por área e assunto.</p><button class="button secondary" data-page="activity">Montar atividade</button></div>
-          <div id="performanceData" class="hidden"><div class="metric-grid" id="performanceMetrics"></div><article class="glass-card confidence-card"><div class="card-heading"><div><div class="eyebrow">SEGURANÇA NAS RESPOSTAS</div><h2>Confiança e precisão</h2></div></div><div id="confidenceStats" class="confidence-stats"></div><p class="fine-print">A comparação considera como você marcou sua confiança em cada resposta concluída. Ela descreve seu histórico, não mede uma habilidade fixa.</p></article><div class="analysis-grid"><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">VISÃO POR ÁREA</div><h2>Domínio por área</h2></div></div><div id="areaBars" class="bar-list"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">VISÃO POR MATÉRIA</div><h2>Precisão por matéria</h2></div></div><div id="subjectBars" class="bar-list"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PONTOS DE ATENÇÃO</div><h2>Assuntos para retomar</h2></div></div><div id="weakTopics" class="compact-list"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PADRÕES ASSOCIADOS A ERROS</div><h2>Categorias recorrentes</h2></div></div><div id="errorPatternList" class="compact-list"></div></article></div><article class="glass-card chart-card"><div class="card-heading"><div><div class="eyebrow">EVOLUÇÃO</div><h2>Histórico de atividades</h2></div></div><div id="activityHistory" class="history-list"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PROFICIÊNCIA EXPERIMENTAL</div><h2>Estimativa inspirada na TRI</h2></div></div><div id="triPanel" class="tri-panel"></div><p class="fine-print">Esta estimativa não equivale à TRI oficial do ENEM. Só será calculada quando as questões importadas trouxerem parâmetros calibrados (a, b e c) adequados.</p></article></div>
-        </section>
-
-        <section class="page" id="page-reviews" data-page-id="reviews">
-          <div class="page-heading"><div><div class="eyebrow">RETOMADA INTELIGENTE</div><h1>Central de revisões.</h1><p class="lead">Questões que merecem outra tentativa, organizadas pela data de revisão.</p></div><button class="button secondary" data-action="review-activity">Resolver revisões ↗</button></div>
-          <div class="review-summary" id="reviewSummary"></div>
-          <div class="review-tabs"><button class="active" data-review-filter="due">Pendentes</button><button data-review-filter="all">Todas</button><button data-review-filter="completed">Concluídas</button></div>
-          <div id="reviewList" class="review-list"></div>
-          <div id="reviewEmpty" class="glass-card empty-state"><span class="empty-symbol large">↻</span><h2>Nenhuma revisão cadastrada</h2><p>Questões respondidas com erro ou marcadas para revisar poderão aparecer aqui. Você também pode adicionar uma revisão manualmente pelo banco.</p></div>
-        </section>
-
-        <section class="page" id="page-library" data-page-id="library">
-          <div class="page-heading"><div><div class="eyebrow">MATERIAL DE APOIO</div><h1>Biblioteca pessoal.</h1><p class="lead">Reúna suas anotações, favoritos e coleções de questões.</p></div><button class="button primary" data-action="new-note">＋ Nova anotação</button></div>
-          <div class="library-grid"><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">ANOTAÇÕES</div><h2>Suas notas</h2></div></div><div id="notesList" class="note-list"></div><div id="notesEmpty" class="empty-inline"><span class="empty-symbol">✎</span><b>Nenhuma anotação ainda</b><p>Crie notas de estudo e vincule-as a matérias ou assuntos.</p></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">SELEÇÃO PESSOAL</div><h2>Questões favoritas</h2></div></div><div id="favoriteList" class="compact-list"></div><div id="favoritesEmpty" class="empty-inline"><span class="empty-symbol">☆</span><b>Sem favoritas</b><p>Marque questões no banco para encontrá-las rapidamente aqui.</p></div></article></div>
-          <article class="glass-card collections-card"><div class="card-heading"><div><div class="eyebrow">COLEÇÕES</div><h2>Listas organizadas</h2></div><button class="text-button" data-action="new-collection">＋ Criar coleção</button></div><div id="collectionsList" class="collection-list"></div><div id="collectionsEmpty" class="empty-inline">Nenhuma coleção criada.</div></article>
-        </section>
-
-        <section class="page" id="page-settings" data-page-id="settings">
-          <div class="page-heading"><div><div class="eyebrow">CONTROLE DO ACERVO</div><h1>Configurações.</h1><p class="lead">Armazenamento, importação, exportação e integridade dos dados deste dispositivo.</p></div></div>
-          <div class="settings-grid"><article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">ARMAZENAMENTO LOCAL</div><h2>Diagnóstico</h2></div><span class="heading-symbol">◈</span></div><div id="storageDiagnostics" class="diagnostic-list"></div><button class="button secondary" id="persistStorage" type="button">Solicitar armazenamento persistente</button><p class="fine-print">Os dados ficam neste navegador e dispositivo. Eles não são sincronizados automaticamente entre celular e computador. Faça backups regulares.</p></article><article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">TRANSFERÊNCIA</div><h2>Backups e pacotes</h2></div><span class="heading-symbol">⇄</span></div><div class="backup-actions"><button class="backup-action" data-action="export-full"><span>⇧</span><b>Backup completo</b><small>Banco, respostas, atividades, revisões, notas, configurações e imagens.</small></button><button class="backup-action" data-action="export-incremental"><span>↗</span><b>Backup incremental</b><small>Alterações desde o último backup incremental ou completo.</small></button><button class="backup-action" data-action="export-package"><span>▧</span><b>Exportar pacote de questões</b><small>Um JSON com as questões e um ZIP opcional com as imagens.</small></button><label class="backup-action file-backup"><span>⇩</span><b>Restaurar backup</b><small>Selecione um ZIP de backup criado pelo Grafia Questions.</small><input type="file" id="restoreFile" accept=".zip,application/zip"></label></div></article></div>
-          <article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">HISTÓRICO</div><h2>Importações e restaurações</h2></div></div><div id="importHistory" class="history-list"></div><div id="importHistoryEmpty" class="empty-inline">Nenhuma importação registrada.</div></article>
-          <article class="glass-card settings-card danger-zone"><div class="card-heading"><div><div class="eyebrow">AÇÃO IRREVERSÍVEL</div><h2>Limpar dados deste dispositivo</h2></div></div><p>Remove o banco local e os registros associados. Exporte um backup antes de continuar.</p><button class="button danger" data-action="clear-database">Apagar todos os dados locais</button></article>
-        </section>
-      </main>
-
-      <nav class="bottom-nav" id="bottomNav" aria-label="Navegação principal">
-        <button class="nav-item active" data-page="home" aria-label="Início"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 10.5 9-7 9 7M5.5 9.5V21h13V9.5M9 21v-7h6v7"/></svg></span><span>Início</span></button>
-        <button class="nav-item" data-page="bank" aria-label="Banco"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span>Banco</span></button>
-        <button class="nav-item" data-page="activity" aria-label="Atividades"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2.8h6V4M8.5 10h7M8.5 14h7M8.5 18h4"/></svg></span><span>Atividades</span></button>
-        <button class="nav-item" data-page="performance" aria-label="Desempenho"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V11M10 20V5M16 20v-8M22 20H2"/></svg></span><span>Desempenho</span></button>
-        <button class="nav-item" data-page="reviews" aria-label="Revisões"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4.8 9A7.5 7.5 0 0 1 18 5.5L20 7M4 17v-5h5M19.2 15A7.5 7.5 0 0 1 6 18.5L4 17"/></svg></span><span>Revisões</span></button>
-        <button class="nav-item" data-page="library" aria-label="Biblioteca"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 1 4 17.5zM4 5.5v12M8 7h8M8 11h8"/></svg></span><span>Biblioteca</span></button>
-      </nav>
-    </div>
-  </div>
-
-  <div class="modal-backdrop hidden" id="modalBackdrop" role="presentation">
-    <section class="modal glass-card" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-      <div class="modal-header"><div><div class="eyebrow" id="modalEyebrow">GRAFIA QUESTIONS</div><h2 id="modalTitle">Detalhes</h2></div><button class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></div>
-      <div class="modal-body" id="modalBody"></div>
-      <div class="modal-footer" id="modalFooter"></div>
-    </section>
-  </div>
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="./js/app.js"></script>
+<div id="app-root">
+<div class="app-shell">
+<header class="topbar">
+<a aria-label="Grafia Questions — Início" class="brand" data-page="home" href="#inicio">
+<span class="brand-mark">G</span>
+<span class="brand-copy"><strong>Grafia Questions</strong></span>
+</a>
+<div class="topbar-right">
+<span class="today-label" id="todayLabel"></span>
+<button aria-label="Abrir configurações" class="icon-button" data-action="open-settings" title="Configurações" type="button">⚙</button>
+</div>
+</header>
+<main id="mainContent" tabindex="-1">
+<section class="page active" data-page-id="home" id="page-home">
+<div class="page-heading"><div><div class="eyebrow">VISÃO GERAL</div><h1>Início</h1></div></div>
+<div class="home-grid">
+<article class="glass-card hero-card">
+<div class="hero-topline"><span class="eyebrow">SEU ACERVO</span><span class="status-dot"><i></i> Armazenamento local</span></div>
+<div class="hero-empty" id="homeEmpty">
+<div aria-hidden="true" class="empty-illustration"><span class="empty-sheet sheet-back"></span><span class="empty-sheet sheet-front"><b>＋</b></span></div>
+<div><h2>Seu banco ainda está vazio</h2><button class="button primary" data-action="open-import" type="button">Importar questões <span>↗</span></button></div>
+</div>
+<div class="hero-populated hidden" id="homePopulated">
+<h2>Acervo pronto</h2>
+<div class="metric-row"><div class="metric"><strong id="homeQuestionCount">0</strong><span>questões no banco</span></div><div class="metric"><strong id="homeActivityCount">0</strong><span>atividades concluídas</span></div><div class="metric"><strong id="homeAccuracy">—</strong><span>taxa de acerto</span></div></div>
+<div class="hero-actions"><button class="button primary" data-page="activity" type="button">Montar atividade</button><button class="button secondary" data-action="open-import" type="button">Adicionar questões</button></div>
+</div>
+</article>
+<article class="glass-card overview-card"><div class="card-heading"><div><div class="eyebrow">ACOMPANHAMENTO</div><h2>Seu desempenho</h2></div></div><div class="empty-inline" id="homePerformance"><span class="empty-symbol">⌁</span><b>Ainda não há resultados</b></div><div class="hidden" id="homePerformanceData"></div></article>
+</div>
+<div class="section-title"><div><div class="eyebrow">ORGANIZAÇÃO</div><h2>Áreas de conhecimento</h2></div><span class="subtle-label" id="areaQuestionTotal">0 questões</span></div>
+<div class="area-grid" id="homeAreas">
+<button class="area-card" data-filter-area="Linguagens"><span class="area-mark">文</span><span><b>Linguagens</b></span><strong>0</strong></button>
+<button class="area-card" data-filter-area="Ciências Humanas"><span class="area-mark">⌂</span><span><b>Ciências Humanas</b></span><strong>0</strong></button>
+<button class="area-card" data-filter-area="Ciências da Natureza"><span class="area-mark">✳</span><span><b>Ciências da Natureza</b></span><strong>0</strong></button>
+<button class="area-card" data-filter-area="Exatas"><span class="area-mark">∑</span><span><b>Exatas</b></span><strong>0</strong></button>
+</div>
+</section>
+<section class="page" data-page-id="bank" id="page-bank">
+<div class="page-heading"><div><div class="eyebrow">ACERVO PESSOAL</div><h1>Banco</h1></div><button class="button primary heading-button" data-action="open-import">＋ Importar</button></div>
+<div class="glass-card bank-tools">
+<label class="search-field"><span>⌕</span><input autocomplete="off" id="bankSearch" placeholder="Buscar no enunciado, assunto ou código…" type="search"/></label>
+<div class="filter-grid"><label><span>Área</span><select id="filterArea"><option value="">Todas as áreas</option><option>Linguagens</option><option>Ciências Humanas</option><option>Ciências da Natureza</option><option>Exatas</option></select></label><label><span>Matéria</span><select id="filterSubject"><option value="">Todas as matérias</option></select></label><label><span>Dificuldade</span><select id="filterDifficulty"><option value="">Todas</option><option value="Fácil">Fácil</option><option value="Média">Média</option><option value="Difícil">Difícil</option></select></label><label><span>Tipo</span><select id="filterType"><option value="">Todos os tipos</option><option value="multiple_choice">Múltipla escolha</option><option value="true_false">Verdadeiro ou falso</option><option value="assertion_set">Múltiplas afirmações</option></select></label></div>
+<div class="bank-toolbar"><span class="subtle-label" id="bankCount">0 questões</span><label class="check-inline"><input id="onlyFavorites" type="checkbox"/> Apenas favoritas</label><button class="text-button" id="clearFilters" type="button">Limpar filtros</button></div>
+</div>
+<div class="question-list" id="bankList"></div>
+<div class="bank-pagination" id="bankPagination"></div>
+<div class="glass-card empty-state" id="bankEmpty"><span class="empty-symbol large">▤</span><h2>O banco ainda não tem questões</h2><button class="button primary" data-action="open-import">Importar primeiro pacote</button></div>
+</section>
+<section class="page" data-page-id="activity" id="page-activity">
+<div class="page-heading"><div><div class="eyebrow">PRÁTICA PERSONALIZADA</div><h1>Atividades</h1></div></div>
+<div class="activity-layout">
+<div class="glass-card builder-card">
+<div class="card-heading"><div><div class="eyebrow">01 / CONTEÚDO</div><h2>Escolha o que praticar</h2></div></div>
+<div class="field-grid activity-content-filters">
+<div class="full-field"><span class="field-title">Áreas de conhecimento</span><div aria-label="Selecionar áreas de conhecimento" class="filter-chip-grid" id="activityAreaFilters"></div></div>
+<div class="full-field"><span class="field-title">Matérias</span><div aria-label="Selecionar matérias" class="filter-chip-grid subject-filter-grid" id="activitySubjectFilters"></div></div>
+<div class="full-field"><span class="field-title">Assuntos</span><div class="topic-picker-heading"><button aria-expanded="false" class="button secondary" id="toggleActivityTopicPicker" type="button">Selecionar assuntos</button><span class="fine-print" id="activityTopicSummary">Nenhum assunto selecionado</span></div><div class="topic-picker-panel hidden" id="activityTopicPicker"><label class="search-field topic-search"><span>⌕</span><input autocomplete="off" id="activityTopicSearch" placeholder="Buscar nos 100 assuntos e no banco…" type="search"/></label><div class="topic-choice-list" id="activityTopicList"></div><div class="topic-custom"><input id="activityTopicCustom" placeholder="Ou digite um assunto personalizado" type="text"/><button class="button secondary" id="addActivityTopic" type="button">Adicionar</button></div></div><div class="selected-topic-list" id="selectedActivityTopics"></div></div>
+<label><span>Dificuldade</span><select id="activityDifficulty"><option value="">Todas</option><option>Fácil</option><option>Média</option><option>Difícil</option></select></label>
+<label><span>Estratégia</span><select id="activityStrategy"><option value="random">Aleatória</option><option value="balanced">Distribuição equilibrada</option><option value="weakness">Priorizar dificuldades</option><option value="review">Priorizar revisões pendentes</option></select></label>
+</div>
+<div class="field-block"><span class="field-title">Quantidade de questões</span><div class="choice-pills" id="questionAmount"><button class="selected" data-value="10" type="button">10</button><button data-value="15" type="button">15</button><button data-value="20" type="button">20</button><button data-value="30" type="button">30</button><button data-value="50" type="button">50</button><button data-value="custom" type="button">Personalizar</button></div><label class="custom-amount hidden" id="customAmountWrap"><span>Quantidade personalizada</span><input id="customAmount" max="500" min="1" type="number" value="12"/></label></div>
+<div class="field-block"><span class="field-title">Elegibilidade</span><label class="check-row"><input checked="" id="includeSolved" type="checkbox"/><span><b>Incluir questões já resolvidas</b></span></label></div>
+</div>
+<div class="glass-card builder-card">
+<div class="card-heading"><div><div class="eyebrow">02 / EXPERIÊNCIA</div><h2>Personalize a correção</h2></div></div>
+<div class="setting-list">
+<label class="setting-row"><span><b>Momento da correção</b></span><select id="correctionMode"><option value="end">Somente ao final</option><option value="immediate">Após cada questão</option></select></label>
+<label class="setting-row"><span><b>Mostrar erros durante a atividade</b></span><input class="switch-input" id="showErrors" type="checkbox"/></label>
+<label class="setting-row"><span><b>Exibir comentários</b></span><select id="commentMode"><option value="available">Quando disponíveis</option><option value="result">Somente no resultado</option><option value="hidden">Não exibir durante a resolução</option></select></label>
+<label class="setting-row"><span><b>Navegação</b></span><select id="navigationMode"><option value="free">Livre</option><option value="sequential">Sequencial</option></select></label>
+<label class="setting-row"><span><b>Cronômetro</b></span><input class="switch-input" id="timerEnabled" type="checkbox"/></label>
+<label class="setting-row" id="timerDurationRow"><span><b>Tempo disponível</b></span><input class="compact-number" disabled="" id="timerMinutes" max="600" min="1" type="number" value="90"/></label>
+<label class="setting-row"><span><b>Pontuação negativa</b></span><input class="switch-input" id="negativeScoring" type="checkbox"/></label>
+</div>
+<div class="builder-footer"><div><span class="eyebrow">DISPONIBILIDADE</span><strong id="eligibleCount">0 questões elegíveis</strong><small id="eligibleHint">Importe questões para liberar a criação.</small></div><button class="button primary" disabled="" id="createActivity" type="button">Criar atividade ↗</button></div>
+</div>
+</div>
+<div class="glass-card empty-inline wide-empty" id="activityNoQuestions"><span class="empty-symbol">▦</span><b>Não há questões para montar uma atividade</b><button class="button secondary" data-action="open-import">Importar questões</button></div>
+<div class="hidden" id="activitySession"></div>
+</section>
+<section class="page" data-page-id="performance" id="page-performance">
+<div class="page-heading"><div><div class="eyebrow">INTELIGÊNCIA DE DESEMPENHO</div><h1>Desempenho</h1></div></div>
+<div class="glass-card empty-state" id="performanceEmpty"><span class="empty-symbol large">▥</span><h2>Seus indicadores ainda estão em formação</h2><button class="button secondary" data-page="activity">Montar atividade</button></div>
+<div class="hidden" id="performanceData"><div class="metric-grid" id="performanceMetrics"></div><article class="glass-card confidence-card"><div class="card-heading"><div><div class="eyebrow">SEGURANÇA NAS RESPOSTAS</div><h2>Confiança e precisão</h2></div></div><div class="confidence-stats" id="confidenceStats"></div></article><div class="analysis-grid"><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">VISÃO POR ÁREA</div><h2>Domínio por área</h2></div></div><div class="bar-list" id="areaBars"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">VISÃO POR MATÉRIA</div><h2>Precisão por matéria</h2></div></div><div class="bar-list" id="subjectBars"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PONTOS DE ATENÇÃO</div><h2>Assuntos para retomar</h2></div></div><div class="compact-list" id="weakTopics"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PADRÕES ASSOCIADOS A ERROS</div><h2>Categorias recorrentes</h2></div></div><div class="compact-list" id="errorPatternList"></div></article></div><article class="glass-card chart-card"><div class="card-heading"><div><div class="eyebrow">EVOLUÇÃO</div><h2>Histórico de atividades</h2></div></div><div class="history-list" id="activityHistory"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PROFICIÊNCIA EXPERIMENTAL</div><h2>Estimativa inspirada na TRI</h2></div></div><div class="tri-panel" id="triPanel"></div></article></div>
+</section>
+<section class="page" data-page-id="reviews" id="page-reviews">
+<div class="page-heading"><div><div class="eyebrow">RETOMADA INTELIGENTE</div><h1>Revisões</h1></div><button class="button secondary" data-action="review-activity">Resolver revisões ↗</button></div>
+<div class="review-summary" id="reviewSummary"></div>
+<div class="review-tabs"><button class="active" data-review-filter="due">Pendentes</button><button data-review-filter="all">Todas</button><button data-review-filter="completed">Concluídas</button></div>
+<div class="review-list" id="reviewList"></div>
+<div class="glass-card empty-state" id="reviewEmpty"><span class="empty-symbol large">↻</span><h2>Nenhuma revisão cadastrada</h2></div>
+</section>
+<section class="page" data-page-id="library" id="page-library">
+<div class="page-heading"><div><div class="eyebrow">MATERIAL DE APOIO</div><h1>Biblioteca</h1></div><button class="button primary" data-action="new-note">＋ Nova anotação</button></div>
+<div class="library-grid"><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">ANOTAÇÕES</div><h2>Suas notas</h2></div></div><div class="note-list" id="notesList"></div><div class="empty-inline" id="notesEmpty"><span class="empty-symbol">✎</span><b>Nenhuma anotação ainda</b></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">SELEÇÃO PESSOAL</div><h2>Questões favoritas</h2></div></div><div class="compact-list" id="favoriteList"></div><div class="empty-inline" id="favoritesEmpty"><span class="empty-symbol">☆</span><b>Sem favoritas</b></div></article></div>
+<article class="glass-card collections-card"><div class="card-heading"><div><div class="eyebrow">COLEÇÕES</div><h2>Listas organizadas</h2></div><button class="text-button" data-action="new-collection">＋ Criar coleção</button></div><div class="collection-list" id="collectionsList"></div><div class="empty-inline" id="collectionsEmpty">Nenhuma coleção criada.</div></article>
+</section>
+<section class="page" data-page-id="settings" id="page-settings">
+<div class="page-heading"><div><div class="eyebrow">CONTROLE DO ACERVO</div><h1>Configurações</h1></div></div>
+<div class="settings-grid"><article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">ARMAZENAMENTO LOCAL</div><h2>Diagnóstico</h2></div><span class="heading-symbol">◈</span></div><div class="diagnostic-list" id="storageDiagnostics"></div><button class="button secondary" id="persistStorage" type="button">Solicitar armazenamento persistente</button></article><article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">TRANSFERÊNCIA</div><h2>Backups e pacotes</h2></div><span class="heading-symbol">⇄</span></div><div class="backup-actions"><button class="backup-action" data-action="export-full"><span>⇧</span><b>Backup completo</b></button><button class="backup-action" data-action="export-incremental"><span>↗</span><b>Backup incremental</b></button><button class="backup-action" data-action="export-package"><span>▧</span><b>Exportar pacote de questões</b></button><label class="backup-action file-backup"><span>⇩</span><b>Restaurar backup</b><input accept=".zip,application/zip" id="restoreFile" type="file"/></label></div></article></div>
+<article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">HISTÓRICO</div><h2>Importações e restaurações</h2></div></div><div class="history-list" id="importHistory"></div><div class="empty-inline" id="importHistoryEmpty">Nenhuma importação registrada.</div></article>
+<article class="glass-card settings-card danger-zone"><div class="card-heading"><div><div class="eyebrow">AÇÃO IRREVERSÍVEL</div><h2>Limpar dados deste dispositivo</h2></div></div><button class="button danger" data-action="clear-database">Apagar todos os dados locais</button></article>
+</section>
+</main>
+<nav aria-label="Navegação principal" class="bottom-nav" id="bottomNav">
+<button aria-label="Início" class="nav-item active" data-page="home"><span aria-hidden="true" class="nav-icon"><svg viewBox="0 0 24 24"><path d="m3 10.5 9-7 9 7M5.5 9.5V21h13V9.5M9 21v-7h6v7"></path></svg></span><span>Início</span></button>
+<button aria-label="Banco" class="nav-item" data-page="bank"><span aria-hidden="true" class="nav-icon"><svg viewBox="0 0 24 24"><rect height="17" rx="2" width="16" x="4" y="3.5"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg></span><span>Banco</span></button>
+<button aria-label="Atividades" class="nav-item" data-page="activity"><span aria-hidden="true" class="nav-icon"><svg viewBox="0 0 24 24"><rect height="17" rx="2" width="14" x="5" y="4"></rect><path d="M9 4V2.8h6V4M8.5 10h7M8.5 14h7M8.5 18h4"></path></svg></span><span>Atividades</span></button>
+<button aria-label="Desempenho" class="nav-item" data-page="performance"><span aria-hidden="true" class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 20V11M10 20V5M16 20v-8M22 20H2"></path></svg></span><span>Desempenho</span></button>
+<button aria-label="Revisões" class="nav-item" data-page="reviews"><span aria-hidden="true" class="nav-icon"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4.8 9A7.5 7.5 0 0 1 18 5.5L20 7M4 17v-5h5M19.2 15A7.5 7.5 0 0 1 6 18.5L4 17"></path></svg></span><span>Revisões</span></button>
+<button aria-label="Biblioteca" class="nav-item" data-page="library"><span aria-hidden="true" class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 1 4 17.5zM4 5.5v12M8 7h8M8 11h8"></path></svg></span><span>Biblioteca</span></button>
+</nav>
+</div>
+</div>
+<div class="modal-backdrop hidden" id="modalBackdrop" role="presentation">
+<section aria-labelledby="modalTitle" aria-modal="true" class="modal glass-card" id="modal" role="dialog">
+<div class="modal-header"><div><div class="eyebrow" id="modalEyebrow">GRAFIA QUESTIONS</div><h2 id="modalTitle">Detalhes</h2></div><button aria-label="Fechar" class="icon-button" data-action="close-modal">×</button></div>
+<div class="modal-body" id="modalBody"></div>
+<div class="modal-footer" id="modalFooter"></div>
+</section>
+</div>
+<div aria-live="polite" class="toast" id="toast" role="status"></div>
+<script src="./js/app.js" type="module"></script>
 </body>
 </html>
