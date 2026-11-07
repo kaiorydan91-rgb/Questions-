@@ -10,7 +10,20 @@ const nowISO = () => new Date().toISOString();
 const makeId = prefix => `${prefix}-${crypto.randomUUID()}`;
 const STORES = ['questions', 'assets', 'assetBlobs', 'textBases', 'activities', 'answers', 'reviews', 'notes', 'collections', 'settings', 'imports', 'aliases', 'topics', 'changes'];
 const DATA_STORES = STORES.filter(name => !['assetBlobs', 'changes'].includes(name));
-const BANK_PAGE_SIZE = 40;
+const BANK_PAGE_SIZE = 30;
+let sortedQuestionsSource = null;
+let sortedQuestionsCache = [];
+let activityTopicCache = { questions: null, topics: null, items: [], counts: new Map() };
+let bankSearchTimer = null;
+let questionMapSource = null;
+let questionByIdMap = new Map();
+let textBaseMapSource = null;
+let textBaseByIdMap = new Map();
+let answerMapSource = null;
+let answerByIdMap = new Map();
+let assetImageObserver = null;
+const assetLoadPromises = new Map();
+const questionSearchCache = new WeakMap();
 const SUBJECTS = {
   'Linguagens': ['Português', 'Literatura', 'Inglês', 'Espanhol', 'Artes', 'Educação Física'],
   'Ciências Humanas': ['História', 'Geografia', 'Filosofia', 'Sociologia'],
@@ -117,6 +130,7 @@ function openModal(title, body, footer = '', eyebrow = 'GRAFIA QUESTIONS') {
 }
 function closeModal() {
   $('#modalBackdrop').classList.add('hidden');
+  unobserveAssetImages($('#modalBody'));
   $('#modalBody').innerHTML = '';
   $('#modalFooter').innerHTML = '';
 }
@@ -139,9 +153,42 @@ async function refreshData() {
   state.data.topics = await getAll(state.db, 'topics');
   renderAll();
 }
-function questionById(id) { return state.data.questions.find(q => q.id === id); }
-function answerById(id) { return state.data.answers.find(a => a.id === id); }
-function sortedQuestions() { return [...state.data.questions].sort((a, b) => (a.subject || '').localeCompare(b.subject || '') || (a.primaryTopic || '').localeCompare(b.primaryTopic || '') || a.id.localeCompare(b.id)); }
+function questionById(id) {
+  if (questionMapSource !== state.data.questions) {
+    questionMapSource = state.data.questions;
+    questionByIdMap = new Map(questionMapSource.map(question => [question.id, question]));
+  }
+  return questionByIdMap.get(id);
+}
+function textBaseById(id) {
+  if (textBaseMapSource !== state.data.textBases) {
+    textBaseMapSource = state.data.textBases;
+    textBaseByIdMap = new Map(textBaseMapSource.map(item => [item.id, item]));
+  }
+  return textBaseByIdMap.get(id);
+}
+function answerById(id) {
+  if (answerMapSource !== state.data.answers) {
+    answerMapSource = state.data.answers;
+    answerByIdMap = new Map(answerMapSource.map(answer => [answer.id, answer]));
+  }
+  return answerByIdMap.get(id);
+}
+function sortedQuestions() {
+  if (sortedQuestionsSource !== state.data.questions) {
+    sortedQuestionsSource = state.data.questions;
+    sortedQuestionsCache = [...state.data.questions].sort((a, b) => (a.subject || '').localeCompare(b.subject || '') || (a.primaryTopic || '').localeCompare(b.primaryTopic || '') || a.id.localeCompare(b.id));
+  }
+  return sortedQuestionsCache;
+}
+function questionSearchText(question) {
+  let value = questionSearchCache.get(question);
+  if (value === undefined) {
+    value = normalizeSearch([question.id, question.statement, question.primaryTopic, ...(question.secondaryTopics || []), ...(question.subtopics || []), question.subject, question.area, question.source?.name, question.source?.exam].join(' '));
+    questionSearchCache.set(question, value);
+  }
+  return value;
+}
 function topicValues(question) {
   return [...new Set([question.primaryTopic, ...(question.secondaryTopics || []), ...(question.subtopics || [])]
     .map(value => String(value || '').trim()).filter(Boolean))];
@@ -176,6 +223,9 @@ async function syncTopicCatalog(questions) {
 }
 function completedAnswers() { const ids = new Set(state.data.activities.filter(item => item.status === 'completed').map(item => item.id)); return state.data.answers.filter(item => ids.has(item.activityId) && item.response !== '' && item.response != null && item.isCorrect != null); }
 function clearAssetUrlCache() {
+  assetImageObserver?.disconnect();
+  assetImageObserver = null;
+  assetLoadPromises.clear();
   for (const url of state.assetUrls.values()) URL.revokeObjectURL(url);
   state.assetUrls.clear();
 }
@@ -197,11 +247,20 @@ function pageNavigate(page) {
 
 function renderAll() {
   $('#todayLabel').textContent = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' }).format(new Date());
-  renderHome(); renderBank(); renderActivityBuilder(); renderPerformance(); renderReviews(); renderLibrary(); renderSettings();
-  const running = [...state.data.activities].filter(item => item.status === 'running').sort((a,b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
+  // Only render the visible section. Other pages are rendered when opened.
+  renderHome();
+  if (state.page === 'bank') renderBank();
+  if (state.page === 'activity') { if (state.currentActivity?.status === 'running') { renderSession(); startActivityTimer(); } else renderActivityBuilder(); }
+  if (state.page === 'performance') renderPerformance();
+  if (state.page === 'reviews') renderReviews();
+  if (state.page === 'library') renderLibrary();
+  if (state.page === 'settings') renderSettings();
+  const running = state.data.activities.filter(item => item.status === 'running').sort((a,b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
   if (running && !state.currentActivity) {
     state.currentActivity = running;
-    loadActivityAnswers(running.id).then(() => { if (state.page === 'activity') renderSession(); });
+    loadActivityAnswers(running.id).then(() => {
+      if (state.page === 'activity') { renderSession(); startActivityTimer(); }
+    });
   }
 }
 
@@ -247,10 +306,9 @@ function renderBank() {
   const difficulty = $('#filterDifficulty').value;
   const type = $('#filterType').value;
   const onlyFavorites = $('#onlyFavorites').checked;
-  const list = sortedQuestions().filter(q => {
-    const haystack = normalizeSearch([q.id, q.statement, q.primaryTopic, ...(q.secondaryTopics || []), ...(q.subtopics || []), q.subject, q.area, q.source?.name, q.source?.exam].join(' '));
-    return (!search || haystack.includes(search)) && (!area || q.area === area) && (!subject || q.subject === subject) && (!difficulty || q.difficulty === difficulty) && (!type || q.type === type) && (!onlyFavorites || q.favorite);
-  });
+  const list = sortedQuestions().filter(q =>
+    (!search || questionSearchText(q).includes(search)) && (!area || q.area === area) && (!subject || q.subject === subject) && (!difficulty || q.difficulty === difficulty) && (!type || q.type === type) && (!onlyFavorites || q.favorite)
+  );
   const pageCount = Math.max(1, Math.ceil(list.length / BANK_PAGE_SIZE));
   state.bankPage = Math.min(state.bankPage, pageCount);
   const start = (state.bankPage - 1) * BANK_PAGE_SIZE;
@@ -258,7 +316,7 @@ function renderBank() {
   $('#bankCount').textContent = `${list.length.toLocaleString('pt-BR')} ${list.length === 1 ? 'questão encontrada' : 'questões encontradas'}`;
   $('#bankEmpty').classList.toggle('hidden', state.data.questions.length > 0 || search || area || subject || difficulty || type || onlyFavorites);
   if (!list.length && state.data.questions.length) {
-    $('#bankList').innerHTML = '<div class="glass-card empty-inline"><span class="empty-symbol">⌕</span><b>Nenhum resultado encontrado</b><p>Experimente remover algum filtro ou alterar os termos de busca.</p></div>';
+    $('#bankList').innerHTML = '<div class="glass-card empty-inline"><span class="empty-symbol">⌕</span><b>Nenhum resultado encontrado</b></div>';
     $('#bankPagination').innerHTML = '';
     return;
   }
@@ -283,39 +341,46 @@ function eligibleQuestions() {
   }).map(q => ({ ...q, isDue: dueIds.has(q.id) }));
 }
 function buildActivityTopicCatalog() {
+  const questions = state.data.questions || [];
+  const topics = state.data.topics || [];
+  if (activityTopicCache.questions === questions && activityTopicCache.topics === topics) return activityTopicCache.items;
   const catalog = new Map();
-  for (const [discipline, labels] of Object.entries(TOPIC_CATALOG)) {
-    for (const label of labels) {
-      const normalized = normalizeSearch(label);
-      const subjects = TOPIC_SUBJECTS[discipline] || [];
-      const areas = [...new Set(subjects.map(subject => SUBJECT_AREAS[subject]).filter(Boolean))];
-      const old = catalog.get(normalized) || { label, subjects: [], areas: [], source: 'catalog' };
-      old.subjects = [...new Set([...old.subjects, ...subjects])];
-      old.areas = [...new Set([...old.areas, ...areas])];
-      catalog.set(normalized, old);
-    }
-  }
-  for (const topic of state.data.topics || []) {
-    const label = String(topic.label || '').trim();
-    if (!label) continue;
+  const addCatalogTopic = (label, source, subjects = [], areas = []) => {
     const normalized = normalizeSearch(label);
-    const old = catalog.get(normalized) || { label, subjects: [], areas: [], source: 'imported' };
-    old.subjects = [...new Set([...old.subjects, ...(topic.subjects || [])])];
-    old.areas = [...new Set([...old.areas, ...(topic.areas || [])])];
-    old.source = 'both';
+    if (!normalized) return;
+    const old = catalog.get(normalized) || { label, normalized, subjects: [], areas: [], source };
+    old.subjects = [...new Set([...old.subjects, ...subjects])];
+    old.areas = [...new Set([...old.areas, ...areas])];
+    if (old.source !== source) old.source = 'both';
     catalog.set(normalized, old);
+  };
+  for (const [discipline, labels] of Object.entries(TOPIC_CATALOG)) {
+    const subjects = TOPIC_SUBJECTS[discipline] || [];
+    const areas = [...new Set(subjects.map(subject => SUBJECT_AREAS[subject]).filter(Boolean))];
+    for (const label of labels) addCatalogTopic(label, 'catalog', subjects, areas);
   }
-  // Keep question-linked topics even when older backups did not persist a topic catalog.
-  for (const question of state.data.questions || []) {
+  for (const topic of topics) {
+    const label = String(topic.label || '').trim();
+    if (label) addCatalogTopic(label, 'imported', topic.subjects || [], topic.areas || []);
+  }
+  const counts = new Map();
+  for (const question of questions) {
     for (const label of topicValues(question)) {
       const normalized = normalizeSearch(label);
-      const old = catalog.get(normalized) || { label, subjects: [], areas: [], source: 'question' };
+      const old = catalog.get(normalized) || { label, normalized, subjects: [], areas: [], source: 'question' };
       if (question.subject && !old.subjects.includes(question.subject)) old.subjects.push(question.subject);
       if (question.area && !old.areas.includes(question.area)) old.areas.push(question.area);
       catalog.set(normalized, old);
+      let stat = counts.get(normalized);
+      if (!stat) counts.set(normalized, stat = { total: 0, pairs: new Map() });
+      stat.total++;
+      const pair = `${question.area || ''}\u0000${question.subject || ''}`;
+      stat.pairs.set(pair, (stat.pairs.get(pair) || 0) + 1);
     }
   }
-  return [...catalog.values()].sort((a,b) => a.label.localeCompare(b.label, 'pt-BR'));
+  const items = [...catalog.values()].sort((a,b) => a.label.localeCompare(b.label, 'pt-BR'));
+  activityTopicCache = { questions, topics, items, counts };
+  return items;
 }
 function activityTopicOptions() {
   const selectedSubjects = state.activityFilters.subjects;
@@ -324,7 +389,7 @@ function activityTopicOptions() {
   if (selectedSubjects.length) options = options.filter(item => item.subjects.some(subject => selectedSubjects.includes(subject)));
   else if (selectedAreas.length) options = options.filter(item => item.areas.some(area => selectedAreas.includes(area)));
   const query = normalizeSearch(state.activityTopicSearch);
-  if (query) options = options.filter(item => normalizeSearch(item.label).includes(query));
+  if (query) options = options.filter(item => item.normalized.includes(query));
   return options;
 }
 function renderActivityTopicList() {
@@ -334,11 +399,19 @@ function renderActivityTopicList() {
   const options = activityTopicOptions();
   host.innerHTML = options.length ? options.map(item => {
     const active = selected.has(normalizeSearch(item.label));
-    const matchCount = state.data.questions.filter(question => topicValues(question).some(label => normalizeSearch(label) === normalizeSearch(item.label)) &&
-      (!state.activityFilters.subjects.length || state.activityFilters.subjects.includes(question.subject)) &&
-      (!state.activityFilters.areas.length || state.activityFilters.areas.includes(question.area))).length;
+    const stats = activityTopicCache.counts.get(item.normalized);
+    let matchCount = stats?.total || 0;
+    const selectedSubjects = state.activityFilters.subjects;
+    const selectedAreas = state.activityFilters.areas;
+    if (stats && (selectedSubjects.length || selectedAreas.length)) {
+      matchCount = 0;
+      for (const [pair, amount] of stats.pairs) {
+        const [pairArea, pairSubject] = pair.split('\u0000');
+        if ((!selectedSubjects.length || selectedSubjects.includes(pairSubject)) && (!selectedAreas.length || selectedAreas.includes(pairArea))) matchCount += amount;
+      }
+    }
     return `<label class="topic-choice ${active ? 'selected' : ''}"><input type="checkbox" data-toggle-activity-topic="${safeAttr(item.label)}" ${active ? 'checked' : ''}><span>${escapeHTML(item.label)}</span><small>${matchCount ? `${matchCount} questões` : item.source === 'catalog' ? 'catálogo' : 'sem questões no banco'}</small></label>`;
-  }).join('') : '<div class="empty-inline topic-empty">Nenhum assunto encontrado com esse filtro. Você pode cadastrar um assunto personalizado abaixo.</div>';
+  }).join('') : '<div class="empty-inline topic-empty">Nenhum assunto encontrado.</div>';
   const count = state.activityFilters.topics.length;
   const summary = $('#activityTopicSummary');
   if (summary) summary.textContent = count ? `${count} assunto${count === 1 ? '' : 's'} selecionado${count === 1 ? '' : 's'}` : 'Nenhum assunto selecionado';
@@ -354,7 +427,7 @@ function renderActivityBuilder() {
   $('#activitySession').classList.add('hidden');
   const available = eligibleQuestions();
   $('#eligibleCount').textContent = `${available.length} ${available.length === 1 ? 'questão elegível' : 'questões elegíveis'}`;
-  $('#eligibleHint').textContent = available.length ? 'Os filtros de áreas e matérias são combinados. Os assuntos selecionados também entram na busca.' : 'Amplie os filtros ou importe questões para começar.';
+  $('#eligibleHint').textContent = '';
   $('#createActivity').disabled = available.length === 0;
   $('#activityNoQuestions').classList.toggle('hidden', state.data.questions.length > 0);
   $('#activityAreaFilters').innerHTML = Object.keys(SUBJECTS).map(area => `<button type="button" class="filter-chip ${state.activityFilters.areas.includes(area) ? 'selected' : ''}" data-activity-area="${safeAttr(area)}" aria-pressed="${state.activityFilters.areas.includes(area)}">${escapeHTML(area)}</button>`).join('');
@@ -397,7 +470,7 @@ function addActivityTopic(value) {
 function renderEligibleActivityCount() {
   const available = eligibleQuestions();
   $('#eligibleCount').textContent = `${available.length} ${available.length === 1 ? 'questão elegível' : 'questões elegíveis'}`;
-  $('#eligibleHint').textContent = available.length ? 'Os filtros de áreas e matérias são combinados. Os assuntos selecionados também entram na busca.' : 'Amplie os filtros ou importe questões para começar.';
+  $('#eligibleHint').textContent = '';
   $('#createActivity').disabled = available.length === 0;
 }
 
@@ -460,17 +533,18 @@ async function makeActivity() {
 }
 
 async function loadActivityAnswers(activityId) {
-  // Read the persistent source of truth; the UI cache may be stale while an activity is open.
-  const allAnswers = await getAll(state.db, 'answers');
-  state.data.answers = allAnswers;
-  const answers = allAnswers.filter(answer => answer.activityId === activityId);
+  const answers = state.data.answers.filter(answer => answer.activityId === activityId);
   state.activityAnswers = new Map(answers.map(answer => [answer.questionId, answer]));
 }
 function syncAnswerCache(record) {
   state.activityAnswers.set(record.questionId, record);
-  const index = state.data.answers.findIndex(item => item.id === record.id);
-  if (index >= 0) state.data.answers[index] = record;
-  else state.data.answers.push(record);
+  if (answerMapSource !== state.data.answers) {
+    answerMapSource = state.data.answers;
+    answerByIdMap = new Map(answerMapSource.map(answer => [answer.id, answer]));
+  }
+  const old = answerByIdMap.get(record.id);
+  if (old) Object.assign(old, record);
+  else { state.data.answers.push(record); answerByIdMap.set(record.id, record); }
 }
 function getResponseFromQuestion(questionId, question) {
   const card = document.querySelector(`[data-question-card="${CSS.escape(questionId)}"]`);
@@ -505,19 +579,52 @@ function renderSingleImage(question, image) {
   if (!metadata) return `<figure><div class="empty-inline"><b>Imagem indisponível</b><small>${escapeHTML(image.alt || image.assetId)}</small></div>${renderExternalReference(image.sourceUrl, image.sourceLabel || 'Abrir imagem original')}</figure>`;
   return `<figure><img data-asset-id="${safeAttr(image.assetId)}" alt="${safeAttr(image.alt || image.caption || 'Imagem da questão')}" loading="lazy">${image.caption ? `<figcaption>${escapeHTML(image.caption)}</figcaption>` : ''}${renderExternalReference(image.sourceUrl, image.sourceLabel || 'Ver origem da imagem')}</figure>`;
 }
+async function loadAssetImage(element) {
+  const id = element.dataset.assetId;
+  if (!id || !element.isConnected) return;
+  if (state.assetUrls.has(id)) { element.src = state.assetUrls.get(id); return; }
+  let pending = assetLoadPromises.get(id);
+  if (!pending) {
+    pending = (async () => {
+      const stored = await getOne(state.db, 'assetBlobs', id);
+      if (!stored?.blob) return null;
+      const metadata = state.data.assets.find(item => item.id === id);
+      const typed = stored.blob.type ? stored.blob : stored.blob.slice(0, stored.blob.size, stored.type || metadata?.mimeType || 'application/octet-stream');
+      const url = URL.createObjectURL(typed);
+      state.assetUrls.set(id, url);
+      return url;
+    })();
+    assetLoadPromises.set(id, pending);
+  }
+  try {
+    const url = await pending;
+    if (url && element.isConnected) element.src = url;
+    else if (!url && element.isConnected) element.alt = `${element.alt} (arquivo ausente)`;
+  } finally { assetLoadPromises.delete(id); }
+}
+function unobserveAssetImages(root) {
+  if (!assetImageObserver || !root) return;
+  $$('img[data-asset-id]', root).forEach(element => assetImageObserver.unobserve(element));
+}
 async function hydrateAssetImages(root = document) {
   const images = $$('img[data-asset-id]', root);
-  await Promise.all(images.map(async element => {
-    const id = element.dataset.assetId;
-    if (state.assetUrls.has(id)) { element.src = state.assetUrls.get(id); return; }
-    const stored = await getOne(state.db, 'assetBlobs', id);
-    if (!stored?.blob) { element.alt = `${element.alt} (arquivo ausente)`; return; }
-    const metadata = state.data.assets.find(item => item.id === id);
-    const typed = stored.blob.type ? stored.blob : stored.blob.slice(0, stored.blob.size, stored.type || metadata?.mimeType || 'application/octet-stream');
-    const url = URL.createObjectURL(typed);
-    state.assetUrls.set(id, url);
-    element.src = url;
-  }));
+  if (!images.length) return;
+  if ('IntersectionObserver' in window) {
+    assetImageObserver ||= new IntersectionObserver((entries, observer) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        observer.unobserve(entry.target);
+        loadAssetImage(entry.target).catch(error => { console.error(error); entry.target.alt = `${entry.target.alt} (falha ao carregar)`; });
+      }
+    }, { rootMargin: '420px 0px', threshold: 0.01 });
+    for (const element of images) {
+      const url = state.assetUrls.get(element.dataset.assetId);
+      if (url) element.src = url;
+      else assetImageObserver.observe(element);
+    }
+    return;
+  }
+  await Promise.all(images.map(element => loadAssetImage(element)));
 }
 function renderQuestionImages(question, positions = null) {
   if (!question.images?.length) return '';
@@ -558,7 +665,7 @@ function renderResponseOptions(question, current = '', answerRecord = {}, config
     const selected = selectedKey === key.toUpperCase();
     const isDimmed = dimmed.has(key) || dimmed.has(String(key).toUpperCase());
     const specificComment = selected && canShowComment && isComplete ? (alternativeExplanations[key] || alternativeExplanations[key.toLowerCase()] || '') : '';
-    return `<div class="answer-option-row"><label class="answer-option ${isDimmed ? 'dimmed' : ''}" data-hold-option="${safeAttr(key)}" data-question-option="${safeAttr(question.id)}" aria-label="Alternativa ${escapeHTML(key)}. Mantenha pressionada por um segundo para escurecer ou restaurar."><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${selected ? 'checked' : ''}><span class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</span></label>${specificComment ? `<div class="alternative-comment ${isCorrect ? 'correct' : 'wrong'}"><b>${isCorrect ? 'Comentário da alternativa marcada' : `Por que a alternativa ${escapeHTML(key)} está incorreta`}</b><p>${richText(specificComment)}</p></div>` : ''}</div>`;
+    return `<div class="answer-option-row"><label class="answer-option ${isDimmed ? 'dimmed' : ''}" data-hold-option="${safeAttr(key)}" data-question-option="${safeAttr(question.id)}" aria-label="Alternativa ${escapeHTML(key)}"><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${selected ? 'checked' : ''}><span class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</span></label>${specificComment ? `<div class="alternative-comment ${isCorrect ? 'correct' : 'wrong'}"><b>${isCorrect ? 'Comentário da alternativa marcada' : `Por que a alternativa ${escapeHTML(key)} está incorreta`}</b><p>${richText(specificComment)}</p></div>` : ''}</div>`;
   }).join('')}</div>`;
 }
 
@@ -584,9 +691,10 @@ async function renderSession() {
   const answered = questions.filter(q => answerCount(q.id)).length;
   const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${questions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${questions.length ? answered / questions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${questions.map((q,index) => {
     const answer = state.activityAnswers.get(q.id);
-    const textBase = state.data.textBases.find(item => item.id === q.textBaseId);
+    const textBase = textBaseById(q.textBaseId);
     return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${q.explanation || Object.keys(q.alternativeExplanations || {}).length ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem" data-statement-for="${safeAttr(q.id)}">${richText(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, activity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
-  }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid">${questions.map((q,index) => `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button">${index + 1}</button>`).join('')}</div><div class="fine-print">● Respondida · traço inferior: revisar</div><div class="fine-print">Mantenha uma alternativa pressionada por 1 segundo para escurecê-la; repita para restaurar.</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Sair e continuar depois</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
+  }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid">${questions.map((q,index) => `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button">${index + 1}</button>`).join('')}</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Sair e continuar depois</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
+  unobserveAssetImages($('#activitySession'));
   $('#activitySession').innerHTML = html;
   $('.activity-layout').classList.add('hidden');
   $('#activityNoQuestions').classList.add('hidden');
@@ -621,14 +729,11 @@ async function saveQuestionResponse(questionId) {
   if (feedback) feedback.innerHTML = renderQuestionFeedback(question, record, state.currentActivity.config);
   const saved = $('#saved-' + CSS.escape(questionId));
   if (saved) saved.textContent = response ? (complete ? 'Resposta salva automaticamente' : 'Resposta parcial salva automaticamente') : 'Ainda não respondida';
-  const count = state.currentActivity.questionIds.filter(id => answerCount(id)).length;
+  const count = state.currentActivity.questionIds.reduce((total, id) => total + answerCount(id), 0);
   $('#examAnsweredCount').textContent = `${count} de ${state.currentActivity.questionIds.length} respondidas`;
   $('#examProgressBar').style.width = `${count / state.currentActivity.questionIds.length * 100}%`;
-  $$('.exam-number').forEach(button => {
-    const id = button.dataset.jump;
-    button.classList.toggle('answered', Boolean(answerCount(id)));
-    button.classList.toggle('review-mark', Boolean(state.activityAnswers.get(id)?.markedForReview));
-  });
+  const navButton = document.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
+  if (navButton) navButton.classList.toggle('answered', complete);
 }
 async function setConfidence(questionId, confidence) {
   const old = state.activityAnswers.get(questionId) || { id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id, questionId, response: '' };
@@ -643,7 +748,8 @@ async function toggleReviewMark(questionId) {
   syncAnswerCache(next);
   const button = document.querySelector(`[data-action="mark-review"][data-id="${CSS.escape(questionId)}"]`);
   if (button) button.classList.toggle('active', next.markedForReview);
-  $$('.exam-number').forEach(item => { if (item.dataset.jump === questionId) item.classList.toggle('review-mark', next.markedForReview); });
+  const navButton = document.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
+  if (navButton) navButton.classList.toggle('review-mark', next.markedForReview);
 }
 function startActivityTimer() {
   clearInterval(state.activityTimer);
@@ -675,6 +781,9 @@ async function finishActivity(timeExpired = false) {
   const questions = activity.questionIds.map(questionById).filter(Boolean);
   await loadActivityAnswers(activity.id);
   const responseRecords = [];
+  const answerUpdates = [];
+  const reviewUpdates = [];
+  const pendingReviewsByQuestion = new Map(state.data.reviews.filter(item => item.status !== 'completed').map(item => [item.questionId, item]));
   let correct = 0; let wrong = 0; let blank = 0; let netScore = 0;
   for (const question of questions) {
     const answer = state.activityAnswers.get(question.id) || { response: '', confidence: 'unsure', markedForReview: false };
@@ -689,19 +798,20 @@ async function finishActivity(timeExpired = false) {
       if (count > 1) netScore -= 1 / (count - 1);
     }
     const updated = { ...answer, id: `${activity.id}::${question.id}`, activityId: activity.id, questionId: question.id, isCorrect: hasResponse ? isCorrect : null, completedAt: nowISO(), updatedAt: nowISO() };
-    await putRecord(state.db, 'answers', updated);
+    answerUpdates.push(updated);
     state.activityAnswers.set(question.id, updated);
-    const oldReview = state.data.reviews.find(item => item.questionId === question.id && item.status !== 'completed');
+    const oldReview = pendingReviewsByQuestion.get(question.id);
     if (hasResponse && isCorrect && answer.confidence === 'confident' && !answer.markedForReview && oldReview) {
-      await putRecord(state.db, 'reviews', { ...oldReview, status: 'completed', completedAt: nowISO(), updatedAt: nowISO() });
+      reviewUpdates.push({ ...oldReview, status: 'completed', completedAt: nowISO(), updatedAt: nowISO() });
     } else if ((hasResponse && (!isCorrect || answer.confidence !== 'confident')) || answer.markedForReview) {
       const days = !hasResponse ? 1 : !isCorrect ? 1 : answer.confidence === 'guess' ? 2 : 4;
       const reason = !hasResponse ? 'Marcada durante a atividade' : !isCorrect ? 'Resposta incorreta' : answer.markedForReview ? 'Marcada durante a atividade' : 'Resposta com baixa confiança';
       const review = { id: oldReview?.id || makeId('review'), questionId: question.id, sourceActivityId: activity.id, status: 'pending', reason, dueAt: new Date(Date.now() + days * 86400000).toISOString(), createdAt: oldReview?.createdAt || nowISO(), updatedAt: nowISO() };
-      await putRecord(state.db, 'reviews', review);
+      reviewUpdates.push(review);
     }
     responseRecords.push({ question, answer: updated, isCorrect, hasResponse });
   }
+  await writeBatch(state.db, { answers: answerUpdates, ...(reviewUpdates.length ? { reviews: reviewUpdates } : {}) });
   const durationSecs = timeAgoSeconds(activity.startedAt, Date.now());
   const resultRecords = responseRecords.map(item => ({ question: item.question, hasResponse: item.hasResponse, isCorrect: item.isCorrect }));
   const triEstimate = estimateTriTheta(resultRecords);
@@ -723,7 +833,7 @@ async function renderResult(activity) {
   const questions = activity.questionIds.map(questionById).filter(Boolean);
   await loadActivityAnswers(activity.id);
   const result = activity.result || {};
-  $('#activitySession').innerHTML = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">RESULTADO DA ATIVIDADE</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">Concluída em ${formatDate(activity.endedAt, true)} · ${durationLabel(result.durationSecs)}</div></div><button class="button secondary" data-action="new-activity">Nova atividade</button></div><article class="glass-card result-hero"><div class="eyebrow">APROVEITAMENTO</div><div class="result-score"><strong>${result.percentage ?? 0}%</strong><span>${result.correct ?? 0} acertos de ${result.total ?? 0} questões</span></div><div class="metric-row"><div class="metric"><strong>${result.wrong ?? 0}</strong><span>erros</span></div><div class="metric"><strong>${result.blank ?? 0}</strong><span>em branco</span></div><div class="metric"><strong>${Number(result.netScore ?? 0).toFixed(2).replace('.', ',')}</strong><span>pontuação líquida</span></div><div class="metric"><strong>${durationLabel(result.durationSecs)}</strong><span>tempo</span></div></div><div class="result-tri-row"><div><b>${result.triEstimate ? `θ ${result.triEstimate.theta.toFixed(2).replace('.',',')}` : 'θ indisponível'}</b><small>${result.triEstimate ? `${result.triEstimate.count} questões com parâmetros calibrados` : 'O pacote precisa fornecer parâmetros a, b e c calibrados em pelo menos cinco questões.'}</small></div><div><b>${result.difficultyConsistency ? `${result.difficultyConsistency.percentage}%` : '—'}</b><small>coerência entre acertos e níveis de dificuldade. Não é uma nota TRI.</small></div></div></article><div class="eyebrow">REVISÃO DAS RESPOSTAS</div><div style="height:10px"></div><div>${questions.map((q,index) => {
+  $('#activitySession').innerHTML = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">RESULTADO DA ATIVIDADE</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">Concluída em ${formatDate(activity.endedAt, true)} · ${durationLabel(result.durationSecs)}</div></div><button class="button secondary" data-action="new-activity">Nova atividade</button></div><article class="glass-card result-hero"><div class="eyebrow">APROVEITAMENTO</div><div class="result-score"><strong>${result.percentage ?? 0}%</strong><span>${result.correct ?? 0} acertos de ${result.total ?? 0} questões</span></div><div class="metric-row"><div class="metric"><strong>${result.wrong ?? 0}</strong><span>erros</span></div><div class="metric"><strong>${result.blank ?? 0}</strong><span>em branco</span></div><div class="metric"><strong>${Number(result.netScore ?? 0).toFixed(2).replace('.', ',')}</strong><span>pontuação líquida</span></div><div class="metric"><strong>${durationLabel(result.durationSecs)}</strong><span>tempo</span></div></div><div class="result-tri-row"><div><b>${result.triEstimate ? `θ ${result.triEstimate.theta.toFixed(2).replace('.',',')}` : 'θ indisponível'}</b></div><div><b>${result.difficultyConsistency ? `${result.difficultyConsistency.percentage}%` : '—'}</b></div></div></article><div class="eyebrow">REVISÃO DAS RESPOSTAS</div><div style="height:10px"></div><div>${questions.map((q,index) => {
     const answer = state.activityAnswers.get(q.id) || {};
     const correctAnswer = getExpectedAnswer(q);
     const complete = responseIsComplete(q, answer.response);
@@ -732,8 +842,8 @@ async function renderResult(activity) {
     const rightLabel = q.type === 'multiple_choice' ? `${correctAnswer}) ${q.alternatives?.[correctAnswer] || ''}` : correctAnswer;
     const selectedKey = String(answer.response || '').trim().toUpperCase();
     const selectedAlternativeExplanation = q.type === 'multiple_choice' ? (q.alternativeExplanations?.[selectedKey] || q.alternativeExplanations?.[selectedKey.toLowerCase()] || '') : '';
-    const textBase = state.data.textBases.find(item => item.id === q.textBaseId);
-    return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${richText(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b><p>${richText(selectedAlternativeExplanation)}</p></div>` : ''}${q.explanation ? `<div class="full-explanation"><b>Resolução completa</b><p>${richText(q.explanation)}</p></div>` : '<p>Esta questão não possui resolução comentada.</p>'}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
+    const textBase = textBaseById(q.textBaseId);
+    return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${richText(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b><p>${richText(selectedAlternativeExplanation)}</p></div>` : ''}${q.explanation ? `<div class="full-explanation"><b>Resolução completa</b><p>${richText(q.explanation)}</p></div>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
   }).join('')}</div><div class="exam-bottom"><button class="button secondary" data-page="performance">Ver desempenho</button><button class="button primary" data-action="new-activity">Voltar ao gerador</button></div></div>`;
   $('.activity-layout').classList.add('hidden'); $('#activityNoQuestions').classList.add('hidden'); $('#activitySession').classList.remove('hidden');
   for (const question of questions) {
@@ -804,7 +914,7 @@ function renderPerformance() {
     }
   });
   const rankedErrors = [...errorPatterns.entries()].sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0])).slice(0,8);
-  $('#errorPatternList').innerHTML = rankedErrors.length ? rankedErrors.map(([name,count]) => `<div class="compact-item"><span><b>${escapeHTML(name)}</b><small>Questões incorretas associadas</small></span><strong>${count}</strong></div>`).join('') : '<div class="empty-inline">As questões importadas ainda não fornecem categorias de erro suficientes, ou nenhuma questão classificada foi respondida incorretamente.</div>';
+  $('#errorPatternList').innerHTML = rankedErrors.length ? rankedErrors.map(([name,count]) => `<div class="compact-item"><span><b>${escapeHTML(name)}</b><small>Questões incorretas associadas</small></span><strong>${count}</strong></div>`).join('') : '<div class="empty-inline">Sem dados.</div>';
   $('#activityHistory').innerHTML = completedActivities.slice().reverse().slice(0,8).map(item => `<div class="history-row"><span><b>${escapeHTML(item.title)}</b><small>${formatDate(item.endedAt || item.createdAt)} · ${item.result?.total || 0} questões · ${durationLabel(item.durationSecs)}</small></span><span class="history-score">${item.result?.percentage ?? 0}%</span></div>`).join('') || '<div class="empty-inline">Nenhuma atividade concluída.</div>';
   renderTriEstimate(answers);
 }
@@ -832,23 +942,26 @@ function estimateTriTheta(records) {
 }
 function calculateDifficultyConsistency(records) {
   const levels = { 'facil': 1, 'facil ': 1, 'media': 2, 'medio': 2, 'dificil': 3 };
-  const items = records.filter(record => record.hasResponse && record.question?.difficulty)
-    .map(record => ({ level: levels[normalizeSearch(record.question.difficulty)], correct: Boolean(record.isCorrect) }))
-    .filter(item => Number.isFinite(item.level));
-  let comparisons = 0, inversions = 0;
-  for (let i=0;i<items.length;i++) for (let j=0;j<items.length;j++) {
-    if (items[i].level < items[j].level) {
-      comparisons++;
-      if (!items[i].correct && items[j].correct) inversions++;
-    }
+  const counts = { easy: { total: 0, wrong: 0 }, medium: { total: 0, wrong: 0 }, hard: { total: 0, wrong: 0 } };
+  const keys = { 1: 'easy', 2: 'medium', 3: 'hard' };
+  for (const record of records) {
+    if (!record.hasResponse || !record.question?.difficulty) continue;
+    const level = levels[normalizeSearch(record.question.difficulty)];
+    const key = keys[level];
+    if (!key) continue;
+    counts[key].total++;
+    if (!record.isCorrect) counts[key].wrong++;
   }
-  return comparisons ? { percentage: Math.round((1-inversions/comparisons)*100), inversions, comparisons } : null;
+  const easy = counts.easy, medium = counts.medium, hard = counts.hard;
+  const comparisons = easy.total * (medium.total + hard.total) + medium.total * hard.total;
+  const inversions = easy.wrong * ((medium.total - medium.wrong) + (hard.total - hard.wrong)) + medium.wrong * (hard.total - hard.wrong);
+  return comparisons ? { percentage: Math.round((1 - inversions / comparisons) * 100), inversions, comparisons } : null;
 }
 function activityPerformanceRecords(activity) {
-  const answers = state.data.answers.filter(answer => answer.activityId === activity.id);
+  const answers = new Map(state.data.answers.filter(answer => answer.activityId === activity.id).map(answer => [answer.questionId, answer]));
   return activity.questionIds.map(id => {
     const question = questionById(id);
-    const answer = answers.find(item => item.questionId === id) || {};
+    const answer = answers.get(id) || {};
     const hasResponse = responseIsComplete(question || {}, answer.response);
     return { question, answer, hasResponse, isCorrect: hasResponse && responseIsCorrect(question, answer.response) };
   }).filter(item => item.question);
@@ -869,7 +982,7 @@ function renderTriEstimate(_answers) {
   const consistencyHtml = consistency
     ? `<div class="metric"><strong>${consistency.percentage}%</strong><span>coerência entre níveis de dificuldade</span></div>`
     : `<div class="metric"><strong>—</strong><span>Classifique questões como fácil, média ou difícil para analisar consistência</span></div>`;
-  $('#triPanel').innerHTML = `<div class="metric-row">${triHtml}${consistencyHtml}</div><p class="fine-print">A estimativa θ só usa parâmetros a, b e c calibrados no pacote e aplica regularização para amostras pequenas. A coerência compara pares de questões classificadas: errar uma fácil e acertar uma mais difícil reduz o indicador. Esse indicador é diagnóstico, não uma nota TRI nem uma nota oficial do ENEM.</p>`;
+  $('#triPanel').innerHTML = `<div class="metric-row">${triHtml}${consistencyHtml}</div>`;
 }
 
 function renderReviews() {
@@ -910,7 +1023,7 @@ async function renderSettings() {
     const ids = importRecordQuestionIds(item);
     const total = Number(item.packageQuestionCount) || ids.length || Number(item.importedCount) || 0;
     const canCreate = ids.length > 0 && ['Concluída', 'Parcial'].includes(item.status || 'Concluída');
-    const unavailable = !ids.length ? '<small class="import-history-note">Este registro é de uma versão anterior e não contém a associação das questões. Reimporte o pacote para habilitar a criação da atividade.</small>' : '';
+    const unavailable = '';
     return `<div class="history-row import-history-row"><div class="import-history-main"><b>${escapeHTML(item.packageName || item.fileName || 'Operação')}</b><small>${formatDate(item.createdAt, true)} · ${escapeHTML(item.operation || 'Importação')} · ${total} questões no pacote</small>${unavailable}</div><div class="import-history-actions"><span class="tag peach">${escapeHTML(item.status || 'Concluída')}</span>${canCreate ? `<button class="button primary" type="button" data-action="create-activity-from-import" data-id="${safeAttr(item.id)}">Criar atividade ↗</button>` : ''}</div></div>`;
   }).join('');
 }
@@ -929,13 +1042,13 @@ function formatBytes(bytes) {
 
 async function openQuestionDetail(id) {
   const question = questionById(id); if (!question) return toast('Questão não encontrada.');
-  const textBase = state.data.textBases.find(item => item.id === question.textBaseId);
+  const textBase = textBaseById(question.textBaseId);
   let expected = getExpectedAnswer(question);
   const answerLabel = question.type === 'multiple_choice' ? `${expected}) ${question.alternatives?.[expected] || ''}` : expected;
   const alternatives = question.type === 'multiple_choice' ? Object.entries(question.alternatives || {}).map(([key,value]) => `<div class="answer-option"><div class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</div></div>`).join('') : question.type === 'assertion_set' ? question.statements.map((item,index) => `<p><b>${index+1}.</b> ${richText(item.text)}</p>`).join('') : question.type === 'true_false' ? '<div class="answer-options"><div class="answer-option"><span><b>V</b> — Verdadeiro</span></div><div class="answer-option"><span><b>F</b> — Falso</span></div></div>' : '';
   const beforeStemHtml = `${renderQuestionImages(question,['after_text_base'])}${renderQuestionTables(question,['after_text_base'])}${renderQuestionEquations(question,['after_text_base'])}${renderQuestionImages(question,['before_statement','before-statement'])}`;
   const afterStemHtml = `${renderQuestionImages(question,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(question,['statement','after_statement'])}${renderQuestionEquations(question,['statement','after_statement'])}`;
-  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBase.content)}</div>` : ''}${beforeStemHtml}<div class="exam-stem">${richText(question.statement)}</div>${afterStemHtml}${renderQuestionReferences(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}<div class="answer-feedback correct"><b>Gabarito: ${escapeHTML(answerLabel)}</b>${question.explanation ? `<p>${richText(question.explanation)}</p>` : '<p>Esta questão possui somente o gabarito, sem resolução comentada.</p>'}</div>${question.alternativeExplanations && Object.keys(question.alternativeExplanations).length ? `<h3>Comentários das alternativas</h3>${Object.entries(question.alternativeExplanations).map(([key,value])=>`<p class="fine-print"><b>${escapeHTML(key)}:</b> ${richText(value)}</p>`).join('')}` : ''}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
+  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBase.content)}</div>` : ''}${beforeStemHtml}<div class="exam-stem">${richText(question.statement)}</div>${afterStemHtml}${renderQuestionReferences(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}<div class="answer-feedback correct"><b>Gabarito: ${escapeHTML(answerLabel)}</b>${question.explanation ? `<p>${richText(question.explanation)}</p>` : ''}</div>${question.alternativeExplanations && Object.keys(question.alternativeExplanations).length ? `<h3>Comentários das alternativas</h3>${Object.entries(question.alternativeExplanations).map(([key,value])=>`<p class="fine-print"><b>${escapeHTML(key)}:</b> ${richText(value)}</p>`).join('')}` : ''}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
   await hydrateAssetImages($('#modalBody'));
 }
 async function toggleFavorite(id) {
@@ -1066,7 +1179,7 @@ function saveImportQuestion(id) {
 }
 function openImportModalShellForDraft() {
   const draft = state.importDraft;
-  openModal('Importar pacote de questões', `<div class="modal-form"><div class="import-drop"><b>${escapeHTML(draft.fileName)}</b><small>Arquivo de dados analisado.</small></div><div class="import-drop"><b>${escapeHTML(draft.imageFileName || 'Nenhum ZIP selecionado')}</b><small>As referências das imagens já foram verificadas.</small></div><label>Após importar<select id="importMode"><option value="bank" ${draft.mode==='bank'?'selected':''}>Adicionar ao banco</option><option value="solve" ${draft.mode==='solve'?'selected':''}>Importar e resolver agora</option></select></label><div id="importPreview"></div></div>`, '', 'IMPORTAÇÃO E VALIDAÇÃO');
+  openModal('Importar pacote de questões', `<div class="modal-form"><div class="import-drop"><b>${escapeHTML(draft.fileName)}</b></div><div class="import-drop"><b>${escapeHTML(draft.imageFileName || 'Nenhum ZIP selecionado')}</b></div><label>Após importar<select id="importMode"><option value="bank" ${draft.mode==='bank'?'selected':''}>Adicionar ao banco</option><option value="solve" ${draft.mode==='solve'?'selected':''}>Importar e resolver agora</option></select></label><div id="importPreview"></div></div>`, '', 'IMPORTAÇÃO E VALIDAÇÃO');
 }
 async function commitImport() {
   const draft = state.importDraft; if (!draft) return;
@@ -1182,7 +1295,7 @@ async function saveNote(id = '') {
   await putRecord(state.db, 'notes', record); closeModal(); await refreshData(); toast('Anotação salva.');
 }
 function openCollectionEditor() {
-  openModal('Criar coleção', `<form id="collectionForm" class="modal-form"><label>Nome da coleção<input name="title" required placeholder="Ex.: Questões para revisar"></label><label>Descrição (opcional)<textarea name="description" placeholder="Objetivo desta lista"></textarea></label><p class="fine-print">Depois de criar, você poderá adicionar questões a partir do banco.</p></form>`, `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" data-action="save-collection">Criar coleção</button>`);
+  openModal('Criar coleção', `<form id="collectionForm" class="modal-form"><label>Nome da coleção<input name="title" required placeholder="Ex.: Questões para revisar"></label><label>Descrição (opcional)<textarea name="description" placeholder="Objetivo desta lista"></textarea></label></form>`, `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" data-action="save-collection">Criar coleção</button>`);
 }
 async function saveCollection() {
   const form = $('#collectionForm'); const fd = new FormData(form);
@@ -1199,7 +1312,7 @@ function openCollection(id) {
 }
 function openAddToCollection(id) {
   const collection = state.data.collections.find(item=>item.id===id); if (!collection) return;
-  openModal('Adicionar questões', `<div class="modal-form"><p class="fine-print">Selecione as questões que deseja incluir em ${escapeHTML(collection.title)}.</p><div class="compact-list">${state.data.questions.map(q=>`<label class="check-row"><input type="checkbox" data-collection-question="${safeAttr(q.id)}" ${(collection.questionIds||[]).includes(q.id)?'checked':''}><span><b>${escapeHTML(q.id)} · ${escapeHTML(q.primaryTopic)}</b><small>${escapeHTML(q.subject)}</small></span></label>`).join('') || '<div class="empty-inline">O banco está vazio.</div>'}</div></div>`, `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" data-action="save-collection-questions" data-id="${safeAttr(id)}">Salvar seleção</button>`);
+  openModal('Adicionar questões', `<div class="modal-form"><div class="compact-list">${state.data.questions.map(q=>`<label class="check-row"><input type="checkbox" data-collection-question="${safeAttr(q.id)}" ${(collection.questionIds||[]).includes(q.id)?'checked':''}><span><b>${escapeHTML(q.id)} · ${escapeHTML(q.primaryTopic)}</b><small>${escapeHTML(q.subject)}</small></span></label>`).join('') || '<div class="empty-inline">O banco está vazio.</div>'}</div></div>`, `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" data-action="save-collection-questions" data-id="${safeAttr(id)}">Salvar seleção</button>`);
 }
 async function saveCollectionQuestions(id) {
   const collection = state.data.collections.find(item=>item.id===id); if (!collection) return;
@@ -1607,7 +1720,7 @@ async function toggleTextHighlight() {
   syncAnswerCache(next);
   const selector = target === 'textBase' ? `[data-textbase-for="${CSS.escape(selected.questionId)}"]` : `[data-statement-for="${CSS.escape(selected.questionId)}"]`;
   const root = $(selector);
-  if (root) { root.innerHTML = richText(target === 'textBase' ? (state.data.textBases.find(item => item.id === question.textBaseId)?.content || '') : question.statement); applyTextMarks(root, nextMarks, target); }
+  if (root) { root.innerHTML = richText(target === 'textBase' ? (textBaseById(question.textBaseId)?.content || '') : question.statement); applyTextMarks(root, nextMarks, target); }
   hideTextSelectionToolbar();
   window.getSelection()?.removeAllRanges();
 }
@@ -1746,7 +1859,7 @@ document.addEventListener('change', async event => {
 });
 
 document.addEventListener('input', event => {
-  if (event.target.id === 'bankSearch') { state.bankPage=1; renderBank(); }
+  if (event.target.id === 'bankSearch') { state.bankPage=1; clearTimeout(bankSearchTimer); bankSearchTimer = setTimeout(() => { if (state.page === 'bank') renderBank(); }, 110); }
   if (event.target.id === 'activityTopicSearch') { state.activityTopicSearch = event.target.value; renderActivityTopicList(); }
 });
 document.addEventListener('keydown', event => {
