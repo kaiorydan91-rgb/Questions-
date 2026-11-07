@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.1.0
+# Grafia Questions — versão 1.0.4
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -39,7 +39,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 - **Pacote de questões:** exporta um JSON e, quando necessário, um ZIP opcional de imagens.
 - **Restauração completa:** permite mesclar ou substituir. A substituição dispara antes o download de um backup de segurança e grava os dados em uma transação IndexedDB. Depois de criar qualquer backup, confirme que o arquivo foi salvo antes de avançar o checkpoint incremental; sem essa confirmação, as alterações continuam incluídas no próximo backup.
 
-## Limites conhecidos da versão 1.1.0
+## Limites conhecidos da versão 1.0.4
 
 - A estimativa de proficiência inspirada na TRI é experimental e só aparece com parâmetros `a`, `b` e `c` fornecidos no pacote; não é uma nota oficial do ENEM.
 - A estimativa não deve ser interpretada sem calibração empírica dos parâmetros.
@@ -51,7 +51,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.1.0.md` para os ajustes desta versão.
+Consulte `CHANGELOG_v1.0.4.md` para os ajustes desta versão.
 
 ## Estrutura do projeto
 
@@ -73,19 +73,8 @@ SCHEMA_PACOTE.md
 AUDITORIA_GRAFIA_QUESTIONS_v1.0.1.md
 CHANGELOG_v1.0.3.md
 CHANGELOG_v1.0.4.md
-CHANGELOG_v1.1.0.md
 README.md
 ```
-
-## Atualização 1.1.0
-
-- O gerador aceita várias áreas e matérias na mesma atividade. Os filtros de área e matéria são combinados por união: uma questão entra quando corresponde a pelo menos uma das opções selecionadas.
-- O catálogo de assuntos é derivado das classificações das questões importadas, normalizado e salvo no IndexedDB. A busca também aceita termos digitados livremente e vários assuntos ao mesmo tempo.
-- Durante a resolução, é possível selecionar trechos do enunciado e grifá-los. Os grifos ficam ligados à resposta e reaparecem ao retomar a atividade.
-- Cada alternativa pode ser riscada ou restaurada sem registrar isso como resposta. A escolha efetiva continua sendo feita pelo controle de resposta.
-- Uma atividade em andamento pode ser descartada para montar outra. O descarte remove suas respostas, grifos e eliminações, mantém o registro com status `discarded` e não inclui a sessão nas estatísticas ou no histórico de concluídas.
-- O comentário específico de uma alternativa aparece apenas junto à alternativa selecionada. A tela de resultado também mostra somente o comentário associado à resposta escolhida, nunca os comentários das demais opções.
-- O banco local foi atualizado para a versão 4, com catálogo de assuntos. Backups completos anteriores sem esse catálogo continuam aceitos; ao restaurá-los, o catálogo é reconstruído a partir das questões.
 
 ## Atualização 1.0.4
 
@@ -108,7 +97,7 @@ Este ZIP é um pacote independente para um repositório novo. Extraia os arquivo
 
 ## Histórico de importações e atividades
 
-As importações feitas nesta versão guardam a relação de IDs das questões que vieram em cada pacote. Em **Configurações → Histórico → Criar atividade**, você pode transformar novamente aquele pacote em uma atividade de resolução, inclusive dias depois, sem importar as questões outra vez. O botão não aparece para registros antigos que não tenham essa relação salva; nesses casos, reimporte o mesmo pacote uma vez para habilitar a função. Só pode haver uma atividade em andamento por vez; uma sessão em andamento pode ser descartada no próprio painel de resolução.
+As importações feitas nesta versão guardam a relação de IDs das questões que vieram em cada pacote. Em **Configurações → Histórico → Criar atividade**, você pode transformar novamente aquele pacote em uma atividade de resolução, inclusive dias depois, sem importar as questões outra vez. O botão não aparece para registros antigos que não tenham essa relação salva; nesses casos, reimporte o mesmo pacote uma vez para habilitar a função. Só pode haver uma atividade em andamento por vez.
 
 ## Navegação 1.0.4
 
