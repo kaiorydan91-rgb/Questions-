@@ -1,7 +1,7 @@
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
 const SCOPE_KEY = SCOPE_PATH.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
 const CACHE_PREFIX = `grafia-questions-${SCOPE_KEY}-`;
-const CACHE_NAME = `${CACHE_PREFIX}v1.0.4`;
+const CACHE_NAME = `${CACHE_PREFIX}v1.2.0`;
 const CORE_FILES = [
   './',
   './index.html',

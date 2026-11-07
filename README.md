@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.0.4
+# Grafia Questions — versão 1.1.0
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -39,7 +39,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 - **Pacote de questões:** exporta um JSON e, quando necessário, um ZIP opcional de imagens.
 - **Restauração completa:** permite mesclar ou substituir. A substituição dispara antes o download de um backup de segurança e grava os dados em uma transação IndexedDB. Depois de criar qualquer backup, confirme que o arquivo foi salvo antes de avançar o checkpoint incremental; sem essa confirmação, as alterações continuam incluídas no próximo backup.
 
-## Limites conhecidos da versão 1.0.4
+## Limites conhecidos da versão 1.1.0
 
 - A estimativa de proficiência inspirada na TRI é experimental e só aparece com parâmetros `a`, `b` e `c` fornecidos no pacote; não é uma nota oficial do ENEM.
 - A estimativa não deve ser interpretada sem calibração empírica dos parâmetros.
@@ -51,7 +51,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.0.4.md` para os ajustes desta versão.
+Consulte `CHANGELOG_v1.1.0.md` para os ajustes desta versão.
 
 ## Estrutura do projeto
 
@@ -73,8 +73,14 @@ SCHEMA_PACOTE.md
 AUDITORIA_GRAFIA_QUESTIONS_v1.0.1.md
 CHANGELOG_v1.0.3.md
 CHANGELOG_v1.0.4.md
+CHANGELOG_v1.1.0.md
+CHANGELOG_v1.2.0.md
 README.md
 ```
+
+## Atualização 1.1.0 (histórico)
+
+A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.2.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base.
 
 ## Atualização 1.0.4
 
@@ -97,8 +103,17 @@ Este ZIP é um pacote independente para um repositório novo. Extraia os arquivo
 
 ## Histórico de importações e atividades
 
-As importações feitas nesta versão guardam a relação de IDs das questões que vieram em cada pacote. Em **Configurações → Histórico → Criar atividade**, você pode transformar novamente aquele pacote em uma atividade de resolução, inclusive dias depois, sem importar as questões outra vez. O botão não aparece para registros antigos que não tenham essa relação salva; nesses casos, reimporte o mesmo pacote uma vez para habilitar a função. Só pode haver uma atividade em andamento por vez.
+As importações feitas nesta versão guardam a relação de IDs das questões que vieram em cada pacote. Em **Configurações → Histórico → Criar atividade**, você pode transformar novamente aquele pacote em uma atividade de resolução, inclusive dias depois, sem importar as questões outra vez. O botão não aparece para registros antigos que não tenham essa relação salva; nesses casos, reimporte o mesmo pacote uma vez para habilitar a função. Só pode haver uma atividade em andamento por vez; uma sessão em andamento pode ser descartada no próprio painel de resolução.
 
 ## Navegação 1.0.4
 
 A barra inferior voltou a exibir ícones próprios para as seis áreas. O indicador flutuante que aparecia separado da barra foi eliminado; o estado ativo é indicado dentro do próprio item.
+
+
+## v1.2.0
+
+- Seletor de assuntos usa os 100 tópicos do Grafia Study e os assuntos já importados, filtrados pelas matérias escolhidas, com busca e entrada personalizada.
+- Alternativas podem ser escurecidas por pressão longa de 1 segundo; não há mais botão de riscar nem texto tachado.
+- Comentário da alternativa selecionada aparece antes da resolução completa.
+- Grifos abrangem enunciado e texto-base e continuam salvos na atividade e no resultado.
+- A estimativa de proficiência usa MAP regularizado com parâmetros `a`, `b` e `c` calibrados. O diagnóstico separado de coerência por dificuldade não é uma nota TRI.
