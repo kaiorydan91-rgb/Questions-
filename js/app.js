@@ -8,7 +8,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 document.querySelectorAll('.nav-indicator, .nav-bubble, .nav-orb, .navigation-indicator, .floating-nav-indicator, .nav-active-indicator, .nav-marker, .active-nav-marker, .nav-active-marker, #navIndicator, #navBubble, #navMarker, [data-nav-indicator], [data-nav-bubble], [data-nav-marker]').forEach(element => element.remove());
 const nowISO = () => new Date().toISOString();
 const makeId = prefix => `${prefix}-${crypto.randomUUID()}`;
-const STORES = ['questions', 'assets', 'assetBlobs', 'textBases', 'activities', 'answers', 'reviews', 'notes', 'collections', 'settings', 'imports', 'aliases', 'topics', 'changes'];
+const STORES = ['questions', 'assets', 'assetBlobs', 'textBases', 'activities', 'answers', 'reviews', 'notes', 'collections', 'settings', 'imports', 'aliases', 'changes'];
 const DATA_STORES = STORES.filter(name => !['assetBlobs', 'changes'].includes(name));
 const BANK_PAGE_SIZE = 40;
 const SUBJECTS = {
@@ -20,8 +20,7 @@ const SUBJECTS = {
 const state = {
   db: null, data: {}, page: 'home', importDraft: null, currentActivity: null,
   activityAnswers: new Map(), activityTimer: null, activityStart: null,
-  reviewFilter: 'due', assetUrls: new Map(), restoreDraft: null, restoreConflicts: [], restoreChoices: {}, bankPage: 1, pendingBackup: null, finishingActivityId: null,
-  activityFilters: { areas: [], subjects: [], topics: [] }
+  reviewFilter: 'due', assetUrls: new Map(), restoreDraft: null, restoreConflicts: [], restoreChoices: {}, bankPage: 1, pendingBackup: null, finishingActivityId: null
 };
 
 function escapeHTML(value) {
@@ -126,46 +125,11 @@ async function refreshData() {
   state.data.collections ||= [];
   state.data.imports ||= [];
   state.data.aliases ||= [];
-  state.data.topics ||= [];
-  await syncTopicCatalog(state.data.questions);
-  state.data.topics = await getAll(state.db, 'topics');
   renderAll();
 }
 function questionById(id) { return state.data.questions.find(q => q.id === id); }
 function answerById(id) { return state.data.answers.find(a => a.id === id); }
 function sortedQuestions() { return [...state.data.questions].sort((a, b) => (a.subject || '').localeCompare(b.subject || '') || (a.primaryTopic || '').localeCompare(b.primaryTopic || '') || a.id.localeCompare(b.id)); }
-function topicValues(question) {
-  return [...new Set([question.primaryTopic, ...(question.secondaryTopics || []), ...(question.subtopics || [])]
-    .map(value => String(value || '').trim()).filter(Boolean))];
-}
-async function syncTopicCatalog(questions) {
-  const current = await getAll(state.db, 'topics');
-  const known = new Map(current.map(item => [item.id, item]));
-  const desired = new Map();
-  for (const question of questions || []) {
-    const uniqueQuestionTopics = new Map();
-    for (const label of topicValues(question)) {
-      const normalized = normalizeSearch(label);
-      if (normalized && !uniqueQuestionTopics.has(normalized)) uniqueQuestionTopics.set(normalized, label);
-    }
-    for (const [normalized, label] of uniqueQuestionTopics) {
-      const item = desired.get(normalized) || { id: normalized, normalized, label, questionCount: 0, areas: [], subjects: [] };
-      item.questionCount++;
-      if (question.area && !item.areas.includes(question.area)) item.areas.push(question.area);
-      if (question.subject && !item.subjects.includes(question.subject)) item.subjects.push(question.subject);
-      desired.set(normalized, item);
-    }
-  }
-  const changed = [...desired.values()].filter(item => {
-    const old = known.get(item.id);
-    return !old || old.label !== item.label || old.questionCount !== item.questionCount ||
-      JSON.stringify([...(old.areas || [])].sort()) !== JSON.stringify([...item.areas].sort()) ||
-      JSON.stringify([...(old.subjects || [])].sort()) !== JSON.stringify([...item.subjects].sort());
-  });
-  if (changed.length) await writeBatch(state.db, { topics: changed });
-  const obsolete = current.filter(item => !desired.has(item.id));
-  for (const item of obsolete) await deleteRecord(state.db, 'topics', item.id);
-}
 function completedAnswers() { const ids = new Set(state.data.activities.filter(item => item.status === 'completed').map(item => item.id)); return state.data.answers.filter(item => ids.has(item.activityId) && item.response !== '' && item.response != null && item.isCorrect != null); }
 function clearAssetUrlCache() {
   for (const url of state.assetUrls.values()) URL.revokeObjectURL(url);
@@ -259,20 +223,15 @@ function renderBank() {
 }
 
 function eligibleQuestions() {
-  const { areas, subjects, topics } = state.activityFilters;
+  const area = $('#activityArea').value;
+  const subject = $('#activitySubject').value;
+  const topic = normalizeSearch($('#activityTopic').value);
   const difficulty = $('#activityDifficulty').value;
   const includeSolved = $('#includeSolved').checked;
-  const hasContentFilters = areas.length > 0 || subjects.length > 0;
-  const normalizedTopics = topics.map(normalizeSearch).filter(Boolean);
   const completedActivityIds = new Set(state.data.activities.filter(item => item.status === 'completed').map(item => item.id));
   const answeredIds = new Set(state.data.answers.filter(a => completedActivityIds.has(a.activityId) && a.response !== '' && a.response != null && a.isCorrect != null).map(a => a.questionId));
   const dueIds = new Set(state.data.reviews.filter(r => r.status !== 'completed' && Date.parse(r.dueAt) <= Date.now()).map(r => r.questionId));
-  return state.data.questions.filter(q => {
-    const contentMatch = !hasContentFilters || areas.includes(q.area) || subjects.includes(q.subject);
-    const questionTopics = topicValues(q).map(normalizeSearch);
-    const topicMatch = !normalizedTopics.length || normalizedTopics.some(topic => questionTopics.some(value => value.includes(topic)));
-    return contentMatch && topicMatch && (!difficulty || q.difficulty === difficulty) && (includeSolved || !answeredIds.has(q.id));
-  }).map(q => ({ ...q, isDue: dueIds.has(q.id) }));
+  return state.data.questions.filter(q => (!area || q.area === area) && (!subject || q.subject === subject) && (!topic || normalizeSearch([q.primaryTopic, ...(q.secondaryTopics || []), ...(q.subtopics || [])].join(' ')).includes(topic)) && (!difficulty || q.difficulty === difficulty) && (includeSolved || !answeredIds.has(q.id))).map(q => ({ ...q, isDue: dueIds.has(q.id) }));
 }
 function renderActivityBuilder() {
   if (state.currentActivity?.status === 'running') {
@@ -285,27 +244,17 @@ function renderActivityBuilder() {
   $('#activitySession').classList.add('hidden');
   const available = eligibleQuestions();
   $('#eligibleCount').textContent = `${available.length} ${available.length === 1 ? 'questão elegível' : 'questões elegíveis'}`;
-  $('#eligibleHint').textContent = available.length ? 'Os filtros de áreas e matérias são combinados. Os assuntos selecionados também entram na busca.' : 'Amplie os filtros ou importe questões para começar.';
+  $('#eligibleHint').textContent = available.length ? 'A quantidade será ajustada ao número disponível.' : 'Amplie os filtros ou importe questões para começar.';
   $('#createActivity').disabled = available.length === 0;
   $('#activityNoQuestions').classList.toggle('hidden', state.data.questions.length > 0);
-  $('#activityAreaFilters').innerHTML = Object.keys(SUBJECTS).map(area => `<button type="button" class="filter-chip ${state.activityFilters.areas.includes(area) ? 'selected' : ''}" data-activity-area="${safeAttr(area)}" aria-pressed="${state.activityFilters.areas.includes(area)}">${escapeHTML(area)}</button>`).join('');
-  $('#activitySubjectFilters').innerHTML = Object.values(SUBJECTS).flat().map(subject => `<button type="button" class="filter-chip ${state.activityFilters.subjects.includes(subject) ? 'selected' : ''}" data-activity-subject="${safeAttr(subject)}" aria-pressed="${state.activityFilters.subjects.includes(subject)}">${escapeHTML(subject)}</button>`).join('');
-  const topicLabels = [...new Set([...(state.data.topics || []).map(item => item.label), ...state.data.questions.flatMap(topicValues)])].filter(Boolean).sort((a,b) => a.localeCompare(b));
-  $('#topicSuggestions').innerHTML = topicLabels.map(topic => `<option value="${safeAttr(topic)}"></option>`).join('');
-  $('#selectedActivityTopics').innerHTML = state.activityFilters.topics.map(topic => `<button type="button" class="selected-topic" data-remove-activity-topic="${safeAttr(topic)}"><span>${escapeHTML(topic)}</span><b aria-hidden="true">×</b></button>`).join('');
+  const topics = [...new Set(state.data.questions.flatMap(q => [q.primaryTopic, ...(q.secondaryTopics || []), ...(q.subtopics || [])]).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  $('#topicSuggestions').innerHTML = topics.map(topic => `<option value="${escapeHTML(topic)}"></option>`).join('');
+  fillSubjectSelect($('#activitySubject'), $('#activityArea').value);
   const correctionAtEnd = $('#correctionMode').value === 'end';
   $('#showErrors').disabled = correctionAtEnd;
   if (correctionAtEnd) $('#showErrors').checked = false;
   $('#timerMinutes').disabled = !$('#timerEnabled').checked;
   $('#timerDurationRow').style.opacity = $('#timerEnabled').checked ? '1' : '.55';
-}
-function addActivityTopic(value) {
-  const topic = String(value || '').trim();
-  if (!topic) return;
-  const normalized = normalizeSearch(topic);
-  if (!state.activityFilters.topics.some(item => normalizeSearch(item) === normalized)) state.activityFilters.topics.push(topic);
-  $('#activityTopic').value = '';
-  renderActivityBuilder();
 }
 
 function getQuestionAmount(availableCount) {
@@ -354,8 +303,7 @@ async function makeActivity() {
       correctionMode: $('#correctionMode').value, showErrors: $('#showErrors').checked,
       commentMode: $('#commentMode').value, navigationMode: $('#navigationMode').value,
       timerEnabled: $('#timerEnabled').checked, timerMinutes: Math.min(600, Math.max(1, Number($('#timerMinutes').value) || 90)),
-      negativeScoring: $('#negativeScoring').checked, strategy,
-      filters: { areas: [...state.activityFilters.areas], subjects: [...state.activityFilters.subjects], topics: [...state.activityFilters.topics], difficulty: $('#activityDifficulty').value }
+      negativeScoring: $('#negativeScoring').checked, strategy
     }
   };
   await putRecord(state.db, 'activities', activity);
@@ -447,42 +395,30 @@ function renderQuestionEquations(question, positions = ['after_statement']) {
   return selected.map(item => `<div class="formula-panel">${item.label ? `<small>${escapeHTML(item.label)}</small>` : ''}<div>${escapeHTML(item.expression)}</div></div>`).join('');
 }
 
-function renderResponseOptions(question, current = '', answerRecord = {}, config = null, final = false) {
+function renderResponseOptions(question, current = '') {
   if (question.type === 'true_false') {
-    return `<div class="answer-options" id="options-q-${safeAttr(question.id)}">${[['V','Verdadeiro'],['F','Falso']].map(([value,label]) => `<label class="answer-option"><input type="radio" name="answer-${safeAttr(question.id)}" value="${value}" ${current === value ? 'checked' : ''}><span><b>${value}</b> — ${label}</span></label>`).join('')}</div>`;
+    return `<div class="answer-options">${[['V','Verdadeiro'],['F','Falso']].map(([value,label]) => `<label class="answer-option"><input type="radio" name="answer-${safeAttr(question.id)}" value="${value}" ${current === value ? 'checked' : ''}><span><b>${value}</b> — ${label}</span></label>`).join('')}</div>`;
   }
   if (question.type === 'assertion_set') {
     const chars = String(current || '').split('');
-    return `<div class="answer-options" id="options-q-${safeAttr(question.id)}">${question.statements.map((item,index) => `<label class="statement-answer"><span><b>${index + 1}.</b> ${richText(item.text)}</span><select data-statement-index="${index}" aria-label="Resposta da afirmação ${index + 1}"><option value="">Selecione</option><option value="V" ${chars[index] === 'V' ? 'selected' : ''}>Verdadeiro</option><option value="F" ${chars[index] === 'F' ? 'selected' : ''}>Falso</option></select></label>`).join('')}</div>`;
+    return `<div class="answer-options">${question.statements.map((item,index) => `<label class="statement-answer"><span><b>${index + 1}.</b> ${richText(item.text)}</span><select data-statement-index="${index}" aria-label="Resposta da afirmação ${index + 1}"><option value="">Selecione</option><option value="V" ${chars[index] === 'V' ? 'selected' : ''}>Verdadeiro</option><option value="F" ${chars[index] === 'F' ? 'selected' : ''}>Falso</option></select></label>`).join('')}</div>`;
   }
-  const eliminated = new Set(answerRecord?.eliminatedOptions || []);
-  const canShowComment = final ? config?.commentMode !== 'hidden' : config?.commentMode === 'available' && config?.correctionMode === 'immediate';
-  const selectedKey = String(current || '').trim().toUpperCase();
-  const isComplete = responseIsComplete(question, current);
-  const isCorrect = isComplete && responseIsCorrect(question, current);
-  const alternativeExplanations = question.alternativeExplanations || {};
-  return `<div class="answer-options" id="options-q-${safeAttr(question.id)}">${Object.entries(question.alternatives || {}).map(([key,value]) => {
-    const selected = selectedKey === key.toUpperCase();
-    const crossed = eliminated.has(key);
-    const specificComment = selected && canShowComment && isComplete ? (alternativeExplanations[key] || alternativeExplanations[key.toLowerCase()] || '') : '';
-    return `<div class="answer-option-row"><label class="answer-option ${crossed ? 'eliminated' : ''}"><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${selected ? 'checked' : ''}><span class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</span></label><button type="button" class="eliminate-option ${crossed ? 'active' : ''}" data-action="toggle-eliminated-option" data-id="${safeAttr(question.id)}" data-option="${safeAttr(key)}" aria-pressed="${crossed}">${crossed ? 'Restaurar' : 'Riscar'}</button>${specificComment ? `<div class="alternative-comment ${isCorrect ? 'correct' : 'wrong'}"><b>${isCorrect ? 'Comentário da alternativa marcada' : `Por que a alternativa ${escapeHTML(key)} está incorreta`}</b><p>${richText(specificComment)}</p></div>` : ''}</div>`;
-  }).join('')}</div>`;
+  return `<div class="answer-options">${Object.entries(question.alternatives || {}).map(([key,value]) => `<label class="answer-option"><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${String(current).toUpperCase() === key ? 'checked' : ''}><span class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</span></label>`).join('')}</div>`;
 }
-
 function renderQuestionFeedback(question, answer, config, final = false) {
   if (!answer?.response || !responseIsComplete(question, answer.response)) return '';
   const reveal = final || (config.correctionMode === 'immediate' && config.showErrors);
   const showComment = final ? config.commentMode !== 'hidden' : config.commentMode === 'available' && config.correctionMode === 'immediate';
-  if (!reveal && !(showComment && question.explanation)) return '';
+  if (!reveal && !showComment) return '';
   const correct = responseIsCorrect(question, answer.response);
   const expected = getExpectedAnswer(question);
   const answerLabel = question.type === 'multiple_choice' ? `${expected}) ${question.alternatives?.[expected] || ''}` : expected;
   const kind = correct ? 'correct' : 'wrong';
   const explanation = showComment && question.explanation ? `<p>${richText(question.explanation)}</p>` : '';
-  if (!reveal && !explanation) return '';
-  return `<div class="answer-feedback ${reveal ? kind : 'neutral'}">${reveal ? `<b>${correct ? 'Resposta correta' : 'Resposta incorreta'}</b> · Gabarito: ${escapeHTML(answerLabel)}` : '<b>Comentário disponível</b>'}${explanation}</div>`;
+  const alternatives = showComment && question.alternativeExplanations && Object.keys(question.alternativeExplanations).length ? (final ? `<div>${Object.entries(question.alternativeExplanations).map(([key,value]) => `<p><b>${escapeHTML(key)}:</b> ${richText(value)}</p>`).join('')}</div>` : (() => { const selected = question.type === 'multiple_choice' ? String(answer.response).toUpperCase() : ''; const comment = question.alternativeExplanations[selected]; return comment ? `<p><b>Comentário da alternativa ${escapeHTML(selected)}:</b> ${richText(comment)}</p>` : ''; })()) : '';
+  if (!reveal && !explanation && !alternatives) return '';
+  return `<div class="answer-feedback ${reveal ? kind : 'neutral'}">${reveal ? `<b>${correct ? 'Resposta correta' : 'Resposta incorreta'}</b> · Gabarito: ${escapeHTML(answerLabel)}` : '<b>Comentário disponível</b>'}${explanation}${alternatives}</div>`;
 }
-
 async function renderSession() {
   if (!state.currentActivity) return;
   const activity = state.currentActivity;
@@ -492,14 +428,13 @@ async function renderSession() {
   const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${questions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${questions.length ? answered / questions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${questions.map((q,index) => {
     const answer = state.activityAnswers.get(q.id);
     const textBase = state.data.textBases.find(item => item.id === q.textBaseId);
-    return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${q.explanation || Object.keys(q.alternativeExplanations || {}).length ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBase.content)}</div>` : ''}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem" data-statement-for="${safeAttr(q.id)}">${richText(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, activity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
-  }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid">${questions.map((q,index) => `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button">${index + 1}</button>`).join('')}</div><div class="fine-print">● Respondida · traço inferior: revisar</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Sair e continuar depois</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
+    return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${q.explanation || Object.keys(q.alternativeExplanations || {}).length ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBase.content)}</div>` : ''}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem">${richText(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '')}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
+  }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid">${questions.map((q,index) => `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button">${index + 1}</button>`).join('')}</div><div class="fine-print">● Respondida · traço inferior: revisar</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Sair e continuar depois</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div></div>`;
   $('#activitySession').innerHTML = html;
   $('.activity-layout').classList.add('hidden');
   $('#activityNoQuestions').classList.add('hidden');
   $('#activitySession').classList.remove('hidden');
   await hydrateAssetImages($('#activitySession'));
-  for (const question of questions) applyTextMarks($(`[data-statement-for="${CSS.escape(question.id)}"]`), state.activityAnswers.get(question.id)?.highlights || []);
   if (activity.config.timerEnabled) updateTimerLabel();
 }
 async function saveQuestionResponse(questionId) {
@@ -509,7 +444,7 @@ async function saveQuestionResponse(questionId) {
   const response = getResponseFromQuestion(questionId, question);
   const complete = responseIsComplete(question, response);
   const record = {
-    ...previous, id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id,
+    id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id,
     questionId, response, confidence: previous.confidence || 'unsure', markedForReview: previous.markedForReview || false,
     answeredAt: complete ? nowISO() : null, isCorrect: complete ? responseIsCorrect(question, response) : null,
     updatedAt: nowISO()
@@ -518,8 +453,6 @@ async function saveQuestionResponse(questionId) {
   syncAnswerCache(record);
   const card = document.querySelector(`[data-question-card="${CSS.escape(questionId)}"]`);
   if (!card) return;
-  const options = $('#options-q-' + CSS.escape(questionId));
-  if (options) options.outerHTML = renderResponseOptions(question, record.response || '', record, state.currentActivity.config);
   const feedback = $('#feedback-' + CSS.escape(questionId));
   if (feedback) feedback.innerHTML = renderQuestionFeedback(question, record, state.currentActivity.config);
   const saved = $('#saved-' + CSS.escape(questionId));
@@ -630,12 +563,9 @@ async function renderResult(activity) {
     const status = complete ? (responseIsCorrect(q, answer.response) ? 'Correta' : 'Incorreta') : 'Em branco';
     const userValue = complete ? escapeHTML(answer.response) : (answer.response ? `Parcial (${escapeHTML(answer.response)}) — não contabilizada` : 'Sem resposta');
     const rightLabel = q.type === 'multiple_choice' ? `${correctAnswer}) ${q.alternatives?.[correctAnswer] || ''}` : correctAnswer;
-    const selectedKey = String(answer.response || '').trim().toUpperCase();
-    const selectedAlternativeExplanation = q.type === 'multiple_choice' ? (q.alternativeExplanations?.[selectedKey] || q.alternativeExplanations?.[selectedKey.toLowerCase()] || '') : '';
-    return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3><p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${richText(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${q.explanation ? `<p>${richText(q.explanation)}</p>` : '<p>Esta questão não possui resolução comentada.</p>'}${selectedAlternativeExplanation ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b><p>${richText(selectedAlternativeExplanation)}</p></div>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
+    return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3><p>${richText(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${q.explanation ? `<p>${richText(q.explanation)}</p>` : '<p>Esta questão não possui resolução comentada.</p>'}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
   }).join('')}</div><div class="exam-bottom"><button class="button secondary" data-page="performance">Ver desempenho</button><button class="button primary" data-action="new-activity">Voltar ao gerador</button></div></div>`;
   $('.activity-layout').classList.add('hidden'); $('#activityNoQuestions').classList.add('hidden'); $('#activitySession').classList.remove('hidden');
-  for (const question of questions) applyTextMarks($(`[data-result-statement-for="${CSS.escape(question.id)}"]`), state.activityAnswers.get(question.id)?.highlights || []);
 }
 
 async function computeQuestionAccuracy() {
@@ -1199,7 +1129,6 @@ async function parseBackup(file) {
   if (backup.backupType === 'full') {
     if (!Number.isSafeInteger(backup.checkpointSeq) || backup.checkpointSeq < 0) throw new Error('O backup completo não contém um checkpoint de integridade válido.');
     if (!backup.records || typeof backup.records !== 'object' || Array.isArray(backup.records)) throw new Error('A estrutura de dados do backup completo está inválida.');
-    if (!Array.isArray(backup.records.topics)) backup.records.topics = [];
     for (const table of STORES) if (!Array.isArray(backup.records[table])) throw new Error(`O backup completo não contém uma lista válida para ${table}.`);
     const blobIds = new Set();
     for (const asset of backup.records.assetBlobs) {
@@ -1355,7 +1284,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.1.0');
+  await setSetting(state.db, 'appVersion', '1.0.2');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -1363,128 +1292,9 @@ async function clearDatabase() {
 
 function showSettings() { pageNavigate('settings'); }
 function newActivityFromBuilder() { state.currentActivity = null; clearInterval(state.activityTimer); pageNavigate('activity'); renderActivityBuilder(); }
-async function discardCurrentActivity() {
-  const activity = state.currentActivity;
-  if (!activity || activity.status !== 'running') return;
-  if (!confirm('Descartar esta atividade? As respostas, grifos e alternativas riscadas desta sessão serão apagados. Ela não entrará nas estatísticas nem no histórico de atividades concluídas.')) return;
-  clearInterval(state.activityTimer);
-  const savedAnswers = await getAll(state.db, 'answers');
-  const related = savedAnswers.filter(item => item.activityId === activity.id);
-  for (const answer of related) await deleteRecord(state.db, 'answers', answer.id);
-  await putRecord(state.db, 'activities', { ...activity, status: 'discarded', discardedAt: nowISO(), updatedAt: nowISO() });
-  state.currentActivity = null;
-  state.activityAnswers.clear();
-  state.activityStart = null;
-  await refreshData();
-  pageNavigate('activity');
-  toast('Atividade descartada. Você já pode montar outra.');
-}
-function getTextPoint(root, offset) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node; let consumed = 0;
-  while ((node = walker.nextNode())) {
-    const end = consumed + node.nodeValue.length;
-    if (offset <= end) return { node, offset: Math.max(0, offset - consumed) };
-    consumed = end;
-  }
-  return null;
-}
-function wrapTextRange(root, start, end) {
-  const startPoint = getTextPoint(root, start);
-  const endPoint = getTextPoint(root, end);
-  if (!startPoint || !endPoint || end <= start) return;
-  const range = document.createRange();
-  range.setStart(startPoint.node, startPoint.offset);
-  range.setEnd(endPoint.node, endPoint.offset);
-  const mark = document.createElement('mark');
-  mark.className = 'text-highlight';
-  mark.appendChild(range.extractContents());
-  range.insertNode(mark);
-}
-function applyTextMarks(root, marks = []) {
-  if (!root || !marks?.length) return;
-  [...marks].filter(mark => Number.isFinite(mark.start) && Number.isFinite(mark.end) && mark.end > mark.start)
-    .sort((a,b) => b.start - a.start).forEach(mark => wrapTextRange(root, mark.start, mark.end));
-}
-let pendingTextSelection = null;
-function hideTextSelectionToolbar() {
-  const toolbar = $('#textSelectionToolbar');
-  if (toolbar) toolbar.classList.add('hidden');
-  pendingTextSelection = null;
-}
-function updateTextSelectionToolbar() {
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || !selection.rangeCount || !state.currentActivity || state.currentActivity.status !== 'running') return hideTextSelectionToolbar();
-  const range = selection.getRangeAt(0);
-  const stem = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
-    ? range.commonAncestorContainer.closest?.('.exam-stem') || range.commonAncestorContainer.querySelector?.('.exam-stem')
-    : range.commonAncestorContainer.parentElement?.closest('.exam-stem');
-  if (!stem || !stem.contains(range.startContainer) || !stem.contains(range.endContainer)) return hideTextSelectionToolbar();
-  const selectedText = selection.toString().trim();
-  if (!selectedText) return hideTextSelectionToolbar();
-  const prefix = range.cloneRange();
-  prefix.selectNodeContents(stem);
-  prefix.setEnd(range.startContainer, range.startOffset);
-  const throughEnd = range.cloneRange();
-  throughEnd.selectNodeContents(stem);
-  throughEnd.setEnd(range.endContainer, range.endOffset);
-  const start = prefix.toString().length;
-  const end = throughEnd.toString().length;
-  if (end <= start) return hideTextSelectionToolbar();
-  const questionId = stem.closest('[data-question-card]')?.dataset.questionCard;
-  if (!questionId) return hideTextSelectionToolbar();
-  const answer = state.activityAnswers.get(questionId) || {};
-  const overlaps = (answer.highlights || []).some(mark => start < mark.end && end > mark.start);
-  pendingTextSelection = { questionId, start, end, text: selectedText, remove: overlaps };
-  const toolbar = $('#textSelectionToolbar');
-  const button = toolbar?.querySelector('button');
-  if (!toolbar || !button) return;
-  button.textContent = overlaps ? 'Remover grifo' : 'Grifar trecho';
-  const rect = range.getBoundingClientRect();
-  toolbar.style.left = `${Math.max(10, Math.min(window.innerWidth - 170, rect.left))}px`;
-  toolbar.style.top = `${Math.max(10, Math.min(window.innerHeight - 52, rect.bottom + 8))}px`;
-  toolbar.classList.remove('hidden');
-}
-async function toggleTextHighlight() {
-  const selected = pendingTextSelection;
-  if (!selected || !state.currentActivity) return;
-  const question = questionById(selected.questionId);
-  if (!question) return hideTextSelectionToolbar();
-  const old = state.activityAnswers.get(selected.questionId) || { id: `${state.currentActivity.id}::${selected.questionId}`, activityId: state.currentActivity.id, questionId: selected.questionId, response: '' };
-  const marks = [...(old.highlights || [])];
-  const nextMarks = selected.remove
-    ? marks.filter(mark => !(selected.start < mark.end && selected.end > mark.start))
-    : [...marks, { start: selected.start, end: selected.end, text: selected.text }].sort((a,b) => a.start - b.start);
-  const next = { ...old, highlights: nextMarks, updatedAt: nowISO() };
-  await putRecord(state.db, 'answers', next);
-  syncAnswerCache(next);
-  const stem = $(`[data-statement-for="${CSS.escape(selected.questionId)}"]`);
-  if (stem) { stem.innerHTML = richText(question.statement); applyTextMarks(stem, nextMarks); }
-  hideTextSelectionToolbar();
-  window.getSelection()?.removeAllRanges();
-}
-async function toggleEliminatedOption(questionId, option) {
-  if (!state.currentActivity || state.currentActivity.status !== 'running') return;
-  const old = state.activityAnswers.get(questionId) || { id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id, questionId, response: '' };
-  const options = new Set(old.eliminatedOptions || []);
-  if (options.has(option)) options.delete(option); else options.add(option);
-  const next = { ...old, eliminatedOptions: [...options], updatedAt: nowISO() };
-  await putRecord(state.db, 'answers', next);
-  syncAnswerCache(next);
-  const question = questionById(questionId);
-  const container = $(`#options-q-${CSS.escape(questionId)}`);
-  if (container && question) container.outerHTML = renderResponseOptions(question, next.response || '', next, state.currentActivity.config);
-}
 
 // Event delegation keeps the interface small and allows pages to be redrawn safely.
 document.addEventListener('click', async event => {
-  const areaChip = event.target.closest('[data-activity-area]');
-  if (areaChip) { const value = areaChip.dataset.activityArea; state.activityFilters.areas = state.activityFilters.areas.includes(value) ? state.activityFilters.areas.filter(item => item !== value) : [...state.activityFilters.areas, value]; renderActivityBuilder(); return; }
-  const subjectChip = event.target.closest('[data-activity-subject]');
-  if (subjectChip) { const value = subjectChip.dataset.activitySubject; state.activityFilters.subjects = state.activityFilters.subjects.includes(value) ? state.activityFilters.subjects.filter(item => item !== value) : [...state.activityFilters.subjects, value]; renderActivityBuilder(); return; }
-  const removeTopic = event.target.closest('[data-remove-activity-topic]');
-  if (removeTopic) { const value = removeTopic.dataset.removeActivityTopic; state.activityFilters.topics = state.activityFilters.topics.filter(item => item !== value); renderActivityBuilder(); return; }
-  if (!event.target.closest('#textSelectionToolbar') && !event.target.closest('.exam-stem')) hideTextSelectionToolbar();
   const pageButton = event.target.closest('[data-page]');
   if (pageButton) { event.preventDefault(); pageNavigate(pageButton.dataset.page); return; }
   const areaButton = event.target.closest('[data-filter-area]');
@@ -1537,9 +1347,6 @@ document.addEventListener('click', async event => {
     else if (action === 'edit-question') openEditQuestion(actionButton.dataset.id);
     else if (action === 'save-question-edit') await saveQuestionEdit(actionButton.dataset.id);
     else if (action === 'finish-activity') await finishActivity(false);
-    else if (action === 'discard-activity') await discardCurrentActivity();
-    else if (action === 'toggle-text-highlight') await toggleTextHighlight();
-    else if (action === 'toggle-eliminated-option') await toggleEliminatedOption(actionButton.dataset.id, actionButton.dataset.option);
     else if (action === 'exit-activity') { pageNavigate('home'); toast('Atividade salva automaticamente. Volte à área Atividades para continuar.'); }
     else if (action === 'mark-review') await toggleReviewMark(actionButton.dataset.id);
     else if (action === 'new-activity') newActivityFromBuilder();
@@ -1585,7 +1392,8 @@ document.addEventListener('change', async event => {
   if (target.id === 'restoreFile' && target.files?.[0]) { await beginRestore(target.files[0]); target.value = ''; return; }
   if (target.id === 'filterArea') { state.bankPage=1; fillSubjectSelect($('#filterSubject'), target.value); renderBank(); }
   if (target.id === 'filterSubject' || target.id === 'filterDifficulty' || target.id === 'filterType' || target.id === 'onlyFavorites') { state.bankPage=1; renderBank(); }
-  if (target.id === 'activityDifficulty' || target.id === 'includeSolved') renderActivityBuilder();
+  if (target.id === 'activityArea') { fillSubjectSelect($('#activitySubject'), target.value); renderActivityBuilder(); }
+  if (target.id === 'activitySubject' || target.id === 'activityDifficulty' || target.id === 'activityTopic' || target.id === 'includeSolved') renderActivityBuilder();
   if (target.id === 'timerEnabled') renderActivityBuilder();
   if (target.id === 'correctionMode') {
     const correctionAtEnd = target.value === 'end';
@@ -1596,18 +1404,10 @@ document.addEventListener('change', async event => {
 
 document.addEventListener('input', event => {
   if (event.target.id === 'bankSearch') { state.bankPage=1; renderBank(); }
+  if (event.target.id === 'activityTopic') renderActivityBuilder();
 });
-document.addEventListener('keydown', event => {
-  if (event.target.id === 'activityTopic' && event.key === 'Enter') { event.preventDefault(); addActivityTopic(event.target.value); }
-});
-document.addEventListener('pointerup', event => { if (!event.target.closest?.('#textSelectionToolbar')) setTimeout(updateTextSelectionToolbar, 0); });
-document.addEventListener('touchend', event => { if (!event.target.closest?.('#textSelectionToolbar')) setTimeout(updateTextSelectionToolbar, 0); }, { passive: true });
-document.addEventListener('mousedown', event => { if (event.target.closest?.('#textSelectionToolbar button')) event.preventDefault(); });
 
 document.addEventListener('click', event => {
-  if (event.target.closest('#addActivityTopic')) { addActivityTopic($('#activityTopic').value); return; }
-  const selectionButton = event.target.closest('#textSelectionToolbar button');
-  if (selectionButton) { event.preventDefault(); return; }
   const amount = event.target.closest('#questionAmount button');
   if (amount) {
     $$('#questionAmount button').forEach(button=>button.classList.toggle('selected',button===amount));

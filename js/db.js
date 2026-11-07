@@ -1,5 +1,5 @@
 const DB_NAME = 'grafia-questoes-db';
-const DB_VERSION = 4;
+const DB_VERSION = 3;
 
 function requestPromise(request) {
   return new Promise((resolve, reject) => {
@@ -61,9 +61,6 @@ export async function openDB() {
     const imports = ensure('imports', { keyPath: 'id' });
     if (!imports.indexNames.contains('createdAt')) imports.createIndex('createdAt', 'createdAt', { unique: false });
     ensure('aliases', { keyPath: 'alias' });
-    const topics = ensure('topics', { keyPath: 'id' });
-    if (!topics.indexNames.contains('normalized')) topics.createIndex('normalized', 'normalized', { unique: false });
-    if (!topics.indexNames.contains('label')) topics.createIndex('label', 'label', { unique: false });
     ensure('changes', { keyPath: 'seq', autoIncrement: true });
   };
   const db = await requestPromise(request);
@@ -80,7 +77,7 @@ async function ensureInitialSettings(db) {
     if (!currentReq.result) store.put({ key: 'databaseId', value: crypto.randomUUID() });
     const versionReq = store.get('appVersion');
     versionReq.onsuccess = () => {
-      if (versionReq.result?.value !== '1.1.0') store.put({ key: 'appVersion', value: '1.1.0' });
+      if (versionReq.result?.value !== '1.0.4') store.put({ key: 'appVersion', value: '1.0.4' });
     };
   };
   await done;
@@ -165,7 +162,7 @@ export async function writeBatch(db, recordsByStore, aliases = []) {
 }
 
 export async function replaceAllData(db, recordsByStore) {
-  const names = ['questions', 'assets', 'assetBlobs', 'textBases', 'activities', 'answers', 'reviews', 'notes', 'collections', 'settings', 'imports', 'aliases', 'topics', 'changes'];
+  const names = ['questions', 'assets', 'assetBlobs', 'textBases', 'activities', 'answers', 'reviews', 'notes', 'collections', 'settings', 'imports', 'aliases', 'changes'];
   const tx = db.transaction(names, 'readwrite');
   for (const name of names) {
     const store = tx.objectStore(name);
@@ -250,7 +247,7 @@ export async function listChanges(db, afterSequence = 0) {
 }
 
 export async function countAll(db) {
-  const names = ['questions', 'assets', 'activities', 'answers', 'reviews', 'notes', 'collections', 'imports', 'topics'];
+  const names = ['questions', 'assets', 'activities', 'answers', 'reviews', 'notes', 'collections', 'imports'];
   const tx = db.transaction(names, 'readonly');
   const done = transactionDone(tx);
   const counts = await Promise.all(names.map(name => requestPromise(tx.objectStore(name).count())));
