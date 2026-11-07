@@ -1,4 +1,4 @@
-import { openDB, getAll, getAllStoresSnapshot, getChangesSnapshot, getOne, putRecord, deleteRecord, writeBatch, replaceAllData, mergeAllData, getSetting, setSetting, countAll } from './db.js';
+import { openDB, getAll, getAllStoresSnapshot, getChangesSnapshot, getOne, putRecord, deleteRecord, deleteRecords, writeBatch, replaceAllData, mergeAllData, getSetting, setSetting, countAll } from './db.js';
 import { prepareQuestionImport, mergeQuestion, normalizeSearch } from './importer.js';
 import { readZip, writeZip, downloadBlob } from './zip.js';
 
@@ -149,8 +149,13 @@ async function refreshData() {
   state.data.imports ||= [];
   state.data.aliases ||= [];
   state.data.topics ||= [];
-  await syncTopicCatalog(state.data.questions);
-  state.data.topics = await getAll(state.db, 'topics');
+  // The activity picker only exposes the fixed 100-topic catalog and topics
+  // deliberately saved by the user. Legacy question-derived entries are purged.
+  const savedTopics = state.data.topics.filter(isCustomTopic);
+  const obsoleteTopicIds = state.data.topics.filter(topic => !isCustomTopic(topic)).map(topic => topic.id);
+  if (obsoleteTopicIds.length) await deleteRecords(state.db, 'topics', obsoleteTopicIds);
+  state.data.topics = savedTopics;
+  activityTopicCache = { questions: null, topics: null, items: [], counts: new Map() };
   renderAll();
 }
 function questionById(id) {
@@ -193,34 +198,10 @@ function topicValues(question) {
   return [...new Set([question.primaryTopic, ...(question.secondaryTopics || []), ...(question.subtopics || [])]
     .map(value => String(value || '').trim()).filter(Boolean))];
 }
-async function syncTopicCatalog(questions) {
-  const current = await getAll(state.db, 'topics');
-  const known = new Map(current.map(item => [item.id, item]));
-  const desired = new Map();
-  for (const question of questions || []) {
-    const uniqueQuestionTopics = new Map();
-    for (const label of topicValues(question)) {
-      const normalized = normalizeSearch(label);
-      if (normalized && !uniqueQuestionTopics.has(normalized)) uniqueQuestionTopics.set(normalized, label);
-    }
-    for (const [normalized, label] of uniqueQuestionTopics) {
-      const item = desired.get(normalized) || { id: normalized, normalized, label, questionCount: 0, areas: [], subjects: [] };
-      item.questionCount++;
-      if (question.area && !item.areas.includes(question.area)) item.areas.push(question.area);
-      if (question.subject && !item.subjects.includes(question.subject)) item.subjects.push(question.subject);
-      desired.set(normalized, item);
-    }
-  }
-  const changed = [...desired.values()].filter(item => {
-    const old = known.get(item.id);
-    return !old || old.label !== item.label || old.questionCount !== item.questionCount ||
-      JSON.stringify([...(old.areas || [])].sort()) !== JSON.stringify([...item.areas].sort()) ||
-      JSON.stringify([...(old.subjects || [])].sort()) !== JSON.stringify([...item.subjects].sort());
-  });
-  if (changed.length) await writeBatch(state.db, { topics: changed });
-  const obsolete = current.filter(item => !desired.has(item.id));
-  for (const item of obsolete) await deleteRecord(state.db, 'topics', item.id);
+function isCustomTopic(topic) {
+  return Boolean(topic && (topic.custom === true || topic.source === 'custom') && String(topic.label || '').trim());
 }
+
 function completedAnswers() { const ids = new Set(state.data.activities.filter(item => item.status === 'completed').map(item => item.id)); return state.data.answers.filter(item => ids.has(item.activityId) && item.response !== '' && item.response != null && item.isCorrect != null); }
 function clearAssetUrlCache() {
   assetImageObserver?.disconnect();
@@ -351,26 +332,28 @@ function buildActivityTopicCatalog() {
     const old = catalog.get(normalized) || { label, normalized, subjects: [], areas: [], source };
     old.subjects = [...new Set([...old.subjects, ...subjects])];
     old.areas = [...new Set([...old.areas, ...areas])];
-    if (old.source !== source) old.source = 'both';
+    if (source === 'catalog' || old.source !== 'catalog') old.source = source;
     catalog.set(normalized, old);
   };
+  // These are the 100 fixed topics supplied by the user. Imported questions
+  // never add labels or subject/area associations to this list.
   for (const [discipline, labels] of Object.entries(TOPIC_CATALOG)) {
     const subjects = TOPIC_SUBJECTS[discipline] || [];
     const areas = [...new Set(subjects.map(subject => SUBJECT_AREAS[subject]).filter(Boolean))];
     for (const label of labels) addCatalogTopic(label, 'catalog', subjects, areas);
   }
+  // Only explicitly saved custom topics are appended to the fixed catalog.
   for (const topic of topics) {
+    if (!isCustomTopic(topic)) continue;
     const label = String(topic.label || '').trim();
-    if (label) addCatalogTopic(label, 'imported', topic.subjects || [], topic.areas || []);
+    if (label) addCatalogTopic(label, 'custom', topic.subjects || [], topic.areas || []);
   }
   const counts = new Map();
   for (const question of questions) {
     for (const label of topicValues(question)) {
       const normalized = normalizeSearch(label);
-      const old = catalog.get(normalized) || { label, normalized, subjects: [], areas: [], source: 'question' };
-      if (question.subject && !old.subjects.includes(question.subject)) old.subjects.push(question.subject);
-      if (question.area && !old.areas.includes(question.area)) old.areas.push(question.area);
-      catalog.set(normalized, old);
+      // Counts are metadata only: a question cannot create a catalog item.
+      if (!catalog.has(normalized)) continue;
       let stat = counts.get(normalized);
       if (!stat) counts.set(normalized, stat = { total: 0, pairs: new Map() });
       stat.total++;
@@ -386,8 +369,8 @@ function activityTopicOptions() {
   const selectedSubjects = state.activityFilters.subjects;
   const selectedAreas = state.activityFilters.areas;
   let options = buildActivityTopicCatalog();
-  if (selectedSubjects.length) options = options.filter(item => item.subjects.some(subject => selectedSubjects.includes(subject)));
-  else if (selectedAreas.length) options = options.filter(item => item.areas.some(area => selectedAreas.includes(area)));
+  if (selectedSubjects.length) options = options.filter(item => !item.subjects.length || item.subjects.some(subject => selectedSubjects.includes(subject)));
+  else if (selectedAreas.length) options = options.filter(item => !item.areas.length || item.areas.some(area => selectedAreas.includes(area)));
   const query = normalizeSearch(state.activityTopicSearch);
   if (query) options = options.filter(item => item.normalized.includes(query));
   return options;
@@ -397,8 +380,8 @@ function renderActivityTopicList() {
   if (!host) return;
   const selected = new Set(state.activityFilters.topics.map(normalizeSearch));
   const options = activityTopicOptions();
-  host.innerHTML = options.length ? options.map(item => {
-    const active = selected.has(normalizeSearch(item.label));
+  const rows = options.map(item => {
+    const active = selected.has(item.normalized);
     const stats = activityTopicCache.counts.get(item.normalized);
     let matchCount = stats?.total || 0;
     const selectedSubjects = state.activityFilters.subjects;
@@ -410,12 +393,21 @@ function renderActivityTopicList() {
         if ((!selectedSubjects.length || selectedSubjects.includes(pairSubject)) && (!selectedAreas.length || selectedAreas.includes(pairArea))) matchCount += amount;
       }
     }
-    return `<label class="topic-choice ${active ? 'selected' : ''}"><input type="checkbox" data-toggle-activity-topic="${safeAttr(item.label)}" ${active ? 'checked' : ''}><span>${escapeHTML(item.label)}</span><small>${matchCount ? `${matchCount} questões` : item.source === 'catalog' ? 'catálogo' : 'sem questões no banco'}</small></label>`;
-  }).join('') : '<div class="empty-inline topic-empty">Nenhum assunto encontrado.</div>';
+    const countLabel = matchCount ? `${matchCount} questões` : item.source === 'custom' ? 'personalizado' : 'catálogo';
+    return `<label class="topic-choice ${active ? 'selected' : ''}"><input type="checkbox" data-toggle-activity-topic="${safeAttr(item.label)}" ${active ? 'checked' : ''}><span>${escapeHTML(item.label)}</span><small>${countLabel}</small></label>`;
+  }).join('');
+  const rawSearch = String(state.activityTopicSearch || '').trim();
+  const normalizedSearch = normalizeSearch(rawSearch);
+  const exactExists = normalizedSearch && buildActivityTopicCatalog().some(item => item.normalized === normalizedSearch);
+  const saveAction = rawSearch && !exactExists
+    ? `<button type="button" class="topic-save-custom" data-save-activity-topic="${safeAttr(rawSearch)}">＋ Salvar “${escapeHTML(rawSearch)}” como assunto personalizado</button>`
+    : '';
+  host.innerHTML = `${rows || (rawSearch ? '<div class="empty-inline topic-empty">Nenhum assunto correspondente.</div>' : '<div class="empty-inline topic-empty">Nenhum assunto disponível.</div>')}${saveAction}`;
   const count = state.activityFilters.topics.length;
   const summary = $('#activityTopicSummary');
   if (summary) summary.textContent = count ? `${count} assunto${count === 1 ? '' : 's'} selecionado${count === 1 ? '' : 's'}` : 'Nenhum assunto selecionado';
 }
+
 function renderActivityBuilder() {
   if (state.currentActivity?.status === 'running') {
     $('.activity-layout').classList.add('hidden');
@@ -458,14 +450,46 @@ function toggleActivityTopic(value, checked = null) {
   renderActivityTopicList();
   renderEligibleActivityCount();
 }
-function addActivityTopic(value) {
-  const topic = String(value || '').trim();
-  if (!topic) return;
-  const normalized = normalizeSearch(topic);
-  if (!state.activityFilters.topics.some(item => normalizeSearch(item) === normalized)) state.activityFilters.topics.push(topic);
-  const custom = $('#activityTopicCustom');
-  if (custom) custom.value = '';
-  renderActivityBuilder();
+async function saveCustomActivityTopic(value) {
+  const label = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!label) return;
+  const normalized = normalizeSearch(label);
+  if (!normalized) return;
+  const existingCatalogItem = buildActivityTopicCatalog().find(item => item.normalized === normalized);
+  if (existingCatalogItem) {
+    state.activityTopicSearch = '';
+    const search = $('#activityTopicSearch'); if (search) search.value = '';
+    toggleActivityTopic(existingCatalogItem.label, true);
+    renderActivityTopicList();
+    return;
+  }
+  const existing = (state.data.topics || []).find(item => isCustomTopic(item) && item.normalized === normalized);
+  const selectedSubjects = state.activityFilters.subjects;
+  const selectedAreas = new Set(state.activityFilters.areas);
+  for (const subject of selectedSubjects) if (SUBJECT_AREAS[subject]) selectedAreas.add(SUBJECT_AREAS[subject]);
+  const subjects = [...new Set([...(existing?.subjects || []), ...selectedSubjects])];
+  const areas = [...new Set([...(existing?.areas || []), ...selectedAreas])];
+  const stamp = nowISO();
+  const record = {
+    ...(existing || {}),
+    id: existing?.id || `custom-${normalized}`,
+    normalized,
+    label: existing?.label || label,
+    custom: true,
+    source: 'custom',
+    subjects,
+    areas,
+    createdAt: existing?.createdAt || stamp,
+    updatedAt: stamp
+  };
+  await putRecord(state.db, 'topics', record);
+  state.data.topics = [...(state.data.topics || []).filter(item => item.id !== record.id), record];
+  activityTopicCache = { questions: null, topics: null, items: [], counts: new Map() };
+  state.activityTopicSearch = '';
+  const search = $('#activityTopicSearch'); if (search) search.value = '';
+  toggleActivityTopic(record.label, true);
+  renderActivityTopicList();
+  toast('Assunto personalizado salvo.');
 }
 function renderEligibleActivityCount() {
   const available = eligibleQuestions();
@@ -1741,7 +1765,8 @@ async function toggleDimmedOption(questionId, option) {
 // Event delegation keeps the interface small and allows pages to be redrawn safely.
 document.addEventListener('click', async event => {
   if (event.target.closest('#toggleActivityTopicPicker')) { state.activityTopicPickerOpen = !state.activityTopicPickerOpen; renderActivityBuilder(); return; }
-  if (event.target.closest('#addActivityTopic')) { addActivityTopic($('#activityTopicCustom')?.value); return; }
+  const saveTopicButton = event.target.closest('[data-save-activity-topic]');
+  if (saveTopicButton) { saveCustomActivityTopic(saveTopicButton.dataset.saveActivityTopic).catch(error => { console.error(error); toast('Não foi possível salvar o assunto.'); }); return; }
   const areaChip = event.target.closest('[data-activity-area]');
   if (areaChip) { const value = areaChip.dataset.activityArea; state.activityFilters.areas = state.activityFilters.areas.includes(value) ? state.activityFilters.areas.filter(item => item !== value) : [...state.activityFilters.areas, value]; renderActivityBuilder(); return; }
   const subjectChip = event.target.closest('[data-activity-subject]');
@@ -1863,8 +1888,15 @@ document.addEventListener('input', event => {
   if (event.target.id === 'activityTopicSearch') { state.activityTopicSearch = event.target.value; renderActivityTopicList(); }
 });
 document.addEventListener('keydown', event => {
-  if (event.target.id === 'activityTopicCustom' && event.key === 'Enter') { event.preventDefault(); addActivityTopic(event.target.value); }
-  if (event.target.id === 'activityTopicSearch' && event.key === 'Enter') { event.preventDefault(); const first = activityTopicOptions()[0]; if (first) toggleActivityTopic(first.label, true); }
+  if (event.target.id === 'activityTopicSearch' && event.key === 'Enter') {
+    event.preventDefault();
+    const query = event.target.value.trim();
+    if (!query) return;
+    const normalized = normalizeSearch(query);
+    const exact = buildActivityTopicCatalog().find(item => item.normalized === normalized);
+    if (exact) toggleActivityTopic(exact.label, true);
+    else saveCustomActivityTopic(query).catch(error => { console.error(error); toast('Não foi possível salvar o assunto.'); });
+  }
 });
 document.addEventListener('pointerdown', event => {
   if (event.target.closest?.('#textSelectionToolbar button')) { event.preventDefault(); return; }

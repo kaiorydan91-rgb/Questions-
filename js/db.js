@@ -80,7 +80,7 @@ async function ensureInitialSettings(db) {
     if (!currentReq.result) store.put({ key: 'databaseId', value: crypto.randomUUID() });
     const versionReq = store.get('appVersion');
     versionReq.onsuccess = () => {
-      if (versionReq.result?.value !== '1.3.0') store.put({ key: 'appVersion', value: '1.3.0' });
+      if (versionReq.result?.value !== '1.4.0') store.put({ key: 'appVersion', value: '1.4.0' });
     };
   };
   await done;
@@ -136,6 +136,20 @@ export async function deleteRecord(db, storeName, id) {
   const tx = db.transaction([storeName, 'changes'], 'readwrite');
   tx.objectStore(storeName).delete(id);
   tx.objectStore('changes').add({ table: storeName, id, action: 'delete', changedAt: now });
+  await transactionDone(tx);
+}
+
+export async function deleteRecords(db, storeName, ids) {
+  const uniqueIds = [...new Set((ids || []).filter(id => id != null))];
+  if (!uniqueIds.length) return;
+  const now = new Date().toISOString();
+  const tx = db.transaction([storeName, 'changes'], 'readwrite');
+  const store = tx.objectStore(storeName);
+  const changes = tx.objectStore('changes');
+  for (const id of uniqueIds) {
+    store.delete(id);
+    changes.add({ table: storeName, id, action: 'delete', changedAt: now });
+  }
   await transactionDone(tx);
 }
 
