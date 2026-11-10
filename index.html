@@ -56,6 +56,11 @@
 </section>
 <section class="page" data-page-id="bank" id="page-bank">
 <div class="page-heading"><div><div class="eyebrow">ACERVO PESSOAL</div><h1>Banco</h1></div><button class="button primary heading-button" data-action="open-import">＋ Importar</button></div>
+<div class="bank-tabs" role="tablist" aria-label="Seções do banco">
+<button class="bank-tab active" type="button" data-bank-tab="questions" role="tab" aria-selected="true">Questões</button>
+<button class="bank-tab" type="button" data-bank-tab="packages" role="tab" aria-selected="false">Pacotes e histórico</button>
+</div>
+<div id="bankQuestionsView">
 <div class="glass-card bank-tools">
 <label class="search-field"><span>⌕</span><input autocomplete="off" id="bankSearch" placeholder="Buscar no enunciado, assunto ou código…" type="search"/></label>
 <div class="filter-grid"><label><span>Área</span><select id="filterArea"><option value="">Todas as áreas</option><option>Linguagens</option><option>Ciências Humanas</option><option>Ciências da Natureza</option><option>Exatas</option></select></label><label><span>Matéria</span><select id="filterSubject"><option value="">Todas as matérias</option></select></label><label><span>Dificuldade</span><select id="filterDifficulty"><option value="">Todas</option><option value="Fácil">Fácil</option><option value="Média">Média</option><option value="Difícil">Difícil</option></select></label><label><span>Tipo</span><select id="filterType"><option value="">Todos os tipos</option><option value="multiple_choice">Múltipla escolha</option><option value="true_false">Verdadeiro ou falso</option><option value="assertion_set">Múltiplas afirmações</option></select></label></div>
@@ -64,9 +69,25 @@
 <div class="question-list" id="bankList"></div>
 <div class="bank-pagination" id="bankPagination"></div>
 <div class="glass-card empty-state" id="bankEmpty"><span class="empty-symbol large">▤</span><h2>O banco ainda não tem questões</h2><button class="button primary" data-action="open-import">Importar primeiro pacote</button></div>
+</div>
+<section class="package-history-view hidden" id="bankPackagesView" aria-label="Pacotes e histórico">
+<div class="package-overview-grid" id="packageOverview"></div>
+<div class="glass-card package-tools">
+<label class="search-field"><span>⌕</span><input autocomplete="off" id="packageSearch" placeholder="Buscar pacote, arquivo ou identificador…" type="search"/></label>
+<div class="filter-grid"><label><span>Situação</span><select id="packageStatusFilter"><option value="">Todas</option><option value="Concluída">Concluída</option><option value="Parcial">Parcial</option><option value="Em andamento">Em andamento</option></select></label><label><span>Ordenação</span><select id="packageSort"><option value="recent">Mais recentes</option><option value="oldest">Mais antigos</option><option value="largest">Mais questões</option><option value="name">Nome A–Z</option></select></label></div>
+<div class="bank-toolbar"><span class="subtle-label" id="packageCount">0 pacotes</span><div class="inline-actions"><button class="button small primary" id="combineSelectedPackages" type="button" data-action="create-combined-package-task" disabled>Montar tarefa com selecionados</button><button class="text-button" type="button" data-action="clear-package-filters">Limpar filtros</button></div></div>
+</div>
+<div class="package-list" id="packageHistory"></div>
+<div class="glass-card empty-state hidden" id="packageHistoryEmpty"><span class="empty-symbol large">▤</span><h2>Nenhum pacote encontrado</h2><p>As importações aparecerão aqui depois que você adicionar questões.</p><button class="button primary" data-action="open-import">Importar questões</button></div>
+</section>
 </section>
 <section class="page" data-page-id="activity" id="page-activity">
 <div class="page-heading"><div><div class="eyebrow">PRÁTICA PERSONALIZADA</div><h1>Atividades</h1></div></div>
+<section class="glass-card pending-task-panel" id="pendingTaskSection">
+<div class="card-heading"><div><div class="eyebrow">PLANEJAMENTO DE ESTUDOS</div><h2>Tarefas pendentes</h2></div><span class="tag" id="pendingTaskCount">0</span></div>
+<div class="pending-task-list" id="pendingTaskList"></div>
+<div class="empty-inline hidden" id="pendingTaskEmpty">Você ainda não tem tarefas agendadas. Crie uma tarefa a partir de um pacote ou das recomendações de desempenho.</div>
+</section>
 <div class="activity-layout">
 <div class="glass-card builder-card">
 <div class="card-heading"><div><div class="eyebrow">01 / CONTEÚDO</div><h2>Escolha o que praticar</h2></div></div>
@@ -98,9 +119,18 @@
 <div class="hidden" id="activitySession"></div>
 </section>
 <section class="page" data-page-id="performance" id="page-performance">
-<div class="page-heading"><div><div class="eyebrow">INTELIGÊNCIA DE DESEMPENHO</div><h1>Desempenho</h1></div></div>
+<div class="page-heading"><div><div class="eyebrow">INTELIGÊNCIA DE DESEMPENHO</div><h1>Desempenho</h1></div><button class="button secondary" type="button" data-action="print-performance">Exportar relatório PDF ↗</button></div>
+<div class="glass-card performance-toolbar">
+<div class="performance-filter-grid"><label><span>Período de análise</span><select id="performancePeriod"><option value="7">Últimos 7 dias</option><option value="30">Últimos 30 dias</option><option value="90">Últimos 90 dias</option><option value="all" selected>Todo o histórico</option></select></label><label><span>Área</span><select id="performanceAreaFilter"><option value="">Todas as áreas</option></select></label><label><span>Matéria</span><select id="performanceSubjectFilter"><option value="">Todas as matérias</option></select></label><label><span>Assunto / subassunto</span><select id="performanceTopicFilter"><option value="">Todos os assuntos</option></select></label></div>
+<p class="fine-print" id="performancePeriodNote">Os indicadores consideram atividades concluídas no período selecionado.</p>
+<button class="text-button" type="button" data-action="clear-performance-filters">Limpar filtros</button>
+</div>
 <div class="glass-card empty-state" id="performanceEmpty"><span class="empty-symbol large">▥</span><h2>Seus indicadores ainda estão em formação</h2><button class="button secondary" data-page="activity">Montar atividade</button></div>
-<div class="hidden" id="performanceData"><div class="metric-grid" id="performanceMetrics"></div><article class="glass-card confidence-card"><div class="card-heading"><div><div class="eyebrow">SEGURANÇA NAS RESPOSTAS</div><h2>Confiança e precisão</h2></div></div><div class="confidence-stats" id="confidenceStats"></div></article><div class="analysis-grid"><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">VISÃO POR ÁREA</div><h2>Domínio por área</h2></div></div><div class="bar-list" id="areaBars"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">VISÃO POR MATÉRIA</div><h2>Precisão por matéria</h2></div></div><div class="bar-list" id="subjectBars"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PONTOS DE ATENÇÃO</div><h2>Assuntos para retomar</h2></div></div><div class="compact-list" id="weakTopics"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PADRÕES ASSOCIADOS A ERROS</div><h2>Categorias recorrentes</h2></div></div><div class="compact-list" id="errorPatternList"></div></article></div><article class="glass-card chart-card"><div class="card-heading"><div><div class="eyebrow">EVOLUÇÃO</div><h2>Histórico de atividades</h2></div></div><div class="history-list" id="activityHistory"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PROFICIÊNCIA EXPERIMENTAL</div><h2>Estimativa inspirada na TRI</h2></div></div><div class="tri-panel" id="triPanel"></div></article></div>
+<div class="glass-card empty-state hidden" id="performanceNoResults"><span class="empty-symbol large">⌕</span><h2>Nenhum resultado corresponde a estes filtros</h2><p>Altere a área, matéria, assunto ou período para visualizar outros resultados.</p><button class="button secondary" type="button" data-action="clear-performance-filters">Limpar filtros</button></div>
+<div class="hidden" id="performanceData"><div class="metric-grid" id="performanceMetrics"></div><article class="glass-card confidence-card"><div class="card-heading"><div><div class="eyebrow">SEGURANÇA NAS RESPOSTAS</div><h2>Confiança e precisão</h2></div></div><div class="confidence-stats" id="confidenceStats"></div></article><div class="analysis-grid"><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">VISÃO POR ÁREA</div><h2>Domínio por área</h2></div></div><div class="bar-list" id="areaBars"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">VISÃO POR MATÉRIA</div><h2>Precisão por matéria</h2></div></div><div class="bar-list" id="subjectBars"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">NÍVEL DE DIFICULDADE</div><h2>Precisão por dificuldade</h2></div></div><div class="bar-list" id="difficultyBars"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PONTOS DE ATENÇÃO</div><h2>Assuntos para retomar</h2></div></div><div class="compact-list" id="weakTopics"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PADRÕES DAS QUESTÕES</div><h2>Categorias associadas aos erros</h2></div></div><div class="compact-list" id="errorPatternList"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">AUTODIAGNÓSTICO</div><h2>Motivos de erro informados</h2></div></div><div class="compact-list" id="errorReasonList"></div></article></div>
+<article class="glass-card chart-card"><div class="card-heading"><div><div class="eyebrow">EVOLUÇÃO</div><h2>Progresso ao longo do tempo</h2></div></div><div id="performanceTrend" class="performance-trend"></div></article>
+<article class="glass-card recommendation-card"><div class="card-heading"><div><div class="eyebrow">PRÓXIMOS PASSOS</div><h2>Recomendações de estudo</h2></div></div><div class="recommendation-list" id="studyRecommendations"></div></article>
+<article class="glass-card chart-card"><div class="card-heading"><div><div class="eyebrow">ATIVIDADES CONCLUÍDAS</div><h2>Histórico de atividades</h2></div></div><div class="history-list" id="activityHistory"></div></article><article class="glass-card"><div class="card-heading"><div><div class="eyebrow">PROFICIÊNCIA EXPERIMENTAL</div><h2>Estimativa inspirada na TRI</h2></div></div><div class="tri-panel" id="triPanel"></div></article></div>
 </section>
 <section class="page" data-page-id="reviews" id="page-reviews">
 <div class="page-heading"><div><div class="eyebrow">RETOMADA INTELIGENTE</div><h1>Revisões</h1></div><button class="button secondary" data-action="review-activity">Resolver revisões ↗</button></div>
@@ -117,7 +147,7 @@
 <section class="page" data-page-id="settings" id="page-settings">
 <div class="page-heading"><div><div class="eyebrow">CONTROLE DO ACERVO</div><h1>Configurações</h1></div></div>
 <div class="settings-grid"><article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">ARMAZENAMENTO LOCAL</div><h2>Diagnóstico</h2></div><span class="heading-symbol">◈</span></div><div class="diagnostic-list" id="storageDiagnostics"></div><button class="button secondary" id="persistStorage" type="button">Solicitar armazenamento persistente</button></article><article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">TRANSFERÊNCIA</div><h2>Backups e pacotes</h2></div><span class="heading-symbol">⇄</span></div><div class="backup-actions"><button class="backup-action" data-action="export-full"><span>⇧</span><b>Backup completo</b></button><button class="backup-action" data-action="export-incremental"><span>↗</span><b>Backup incremental</b></button><button class="backup-action" data-action="export-package"><span>▧</span><b>Exportar pacote de questões</b></button><label class="backup-action file-backup"><span>⇩</span><b>Restaurar backup</b><input accept=".zip,application/zip" id="restoreFile" type="file"/></label></div></article></div>
-<article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">HISTÓRICO</div><h2>Importações e restaurações</h2></div></div><div class="history-list" id="importHistory"></div><div class="empty-inline" id="importHistoryEmpty">Nenhuma importação registrada.</div></article>
+<article class="glass-card settings-card"><div class="card-heading"><div><div class="eyebrow">HISTÓRICO</div><h2>Importações e restaurações</h2></div><button class="button secondary" data-action="open-package-history">Abrir histórico completo ↗</button></div><div class="history-list" id="importHistory"></div><div class="empty-inline" id="importHistoryEmpty">Nenhuma importação registrada.</div></article>
 <article class="glass-card settings-card danger-zone"><div class="card-heading"><div><div class="eyebrow">AÇÃO IRREVERSÍVEL</div><h2>Limpar dados deste dispositivo</h2></div></div><button class="button danger" data-action="clear-database">Apagar todos os dados locais</button></article>
 </section>
 </main>

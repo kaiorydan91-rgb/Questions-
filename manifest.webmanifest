@@ -2,7 +2,7 @@
   "id": "./?app=grafia-questions",
   "name": "Grafia Questions",
   "short_name": "Grafia Questions",
-  "description": "Banco pessoal de questões, atividades e análise de aprendizagem.",
+  "description": "Banco pessoal de questões, pacotes importados, tarefas e análise de aprendizagem.",
   "lang": "pt-BR",
   "start_url": "./",
   "scope": "./",

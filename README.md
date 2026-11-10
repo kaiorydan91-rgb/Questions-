@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.1.0
+# Grafia Questions — versão 1.5.0
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -39,19 +39,19 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 - **Pacote de questões:** exporta um JSON e, quando necessário, um ZIP opcional de imagens.
 - **Restauração completa:** permite mesclar ou substituir. A substituição dispara antes o download de um backup de segurança e grava os dados em uma transação IndexedDB. Depois de criar qualquer backup, confirme que o arquivo foi salvo antes de avançar o checkpoint incremental; sem essa confirmação, as alterações continuam incluídas no próximo backup.
 
-## Limites conhecidos da versão 1.1.0
+## Limites conhecidos da versão 1.5.0
 
 - A estimativa de proficiência inspirada na TRI é experimental e só aparece com parâmetros `a`, `b` e `c` fornecidos no pacote; não é uma nota oficial do ENEM.
 - A estimativa não deve ser interpretada sem calibração empírica dos parâmetros.
 - Fórmulas são exibidas como expressões textuais; o aplicativo não inclui um renderizador avançado de LaTeX nesta versão.
-- A versão inicial oferece diagnóstico por área/assunto, confiança declarada, tempo total de atividades e estratégias por dificuldade/revisões. As revisões começam com intervalos heurísticos simples; ainda não há um algoritmo adaptativo avançado nem diagnóstico completo por categorias de erro. O mapa de desempenho melhora à medida que atividades reais são concluídas.
+- O diagnóstico de desempenho usa os registros das atividades concluídas, com filtros por período, área, matéria e assunto/subassunto. As recomendações são heurísticas e exigem ao menos três respostas no assunto; as categorias associadas à questão são metadados, enquanto os motivos de erro são autodeclarados pelo estudante. As revisões continuam usando intervalos heurísticos, não um algoritmo adaptativo avançado.
 - O importador de ZIP usa recursos nativos do navegador (DecompressionStream para entradas compactadas), aceita ZIP32 sem senha e possui limites de tamanho/quantidade para reduzir riscos de arquivos excessivos. ZIP64 e arquivos criptografados não são aceitos. O JSON de questões tem limite de 100 MB; o ZIP tem limite de 512 MB, cada arquivo individual até 100 MB e 20.000 entradas. Navegadores antigos podem exigir ZIPs sem compressão ou atualização.
 - A interface mantém os registros textuais carregados em memória para alimentar filtros, painéis e relatórios; a lista visual é paginada, mas a consulta ainda não usa paginação por cursor diretamente no IndexedDB. Por isso, antes de importar acervos muito grandes (dezenas ou centenas de milhares de questões), é recomendável validar o desempenho no dispositivo e planejar uma otimização de consultas sob demanda. A importação já é dividida em lotes e a preparação do pacote usa Web Worker quando disponível.
 - Não há sincronização entre dispositivos, contas, servidor, IA interna, criptografia dos backups ou recuperação de senha: os arquivos de backup são o meio de transferência.
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.1.0.md` para os ajustes desta versão.
+Consulte `CHANGELOG_v1.5.0.md` para os ajustes desta versão.
 
 ## Estrutura do projeto
 
@@ -76,12 +76,13 @@ CHANGELOG_v1.0.4.md
 CHANGELOG_v1.1.0.md
 CHANGELOG_v1.3.0.md
 CHANGELOG_v1.4.0.md
+CHANGELOG_v1.5.0.md
 README.md
 ```
 
-## Atualização 1.1.0 (histórico)
+## Evolução das versões anteriores
 
-A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente.
+A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente. A versão 1.5.0 acrescenta histórico completo e gestão segura de pacotes, tarefas pendentes, seleção de questões de vários pacotes, desempenho com filtros combinados por período/área/matéria/assunto, análise por dificuldade, autodiagnóstico dos erros e recomendações de estudo.
 
 ## Atualização 1.0.4
 
@@ -126,3 +127,17 @@ A barra inferior voltou a exibir ícones próprios para as seis áreas. O indica
 - Questões importadas deixam de cadastrar ou acrescentar assuntos ao catálogo.
 - A busca permite salvar uma expressão nova como assunto personalizado, mantendo-a no armazenamento local e nos backups.
 - Registros antigos gerados automaticamente a partir das questões são removidos na primeira atualização, sem apagar questões, respostas ou atividades.
+
+
+## v1.5.0
+
+- Banco: a aba **Pacotes e histórico** agrupa registros pelo identificador do pacote, permite busca, filtro e ordenação e mostra questões vinculadas, datas, arquivos e compartilhamento entre pacotes.
+- Histórico: cada pacote pode ter seus registros de histórico removidos sem apagar questões; a exclusão do pacote mostra uma confirmação com contagens e remove somente questões sem outros vínculos.
+- Integridade: questões referenciadas por outro pacote, coleção, atividade, resposta, revisão ou anotação são preservadas; imagens, blobs e textos-base só são eliminados quando não há questões remanescentes que os utilizem.
+- Tarefas: pacotes podem ser transformados em tarefas pendentes, resolvidos imediatamente ou combinados com outros pacotes. O gerador permite filtros por área, matéria, assunto/subassunto e dificuldade, seleção de todas, sorteio por quantidade ou seleção manual paginada, além de ordem embaralhada.
+- Atividades: tarefas pendentes podem ser iniciadas ou excluídas sem remover as questões do banco. As tarefas usam o armazenamento de atividades já existente e entram nos backups.
+- Desempenho: filtros de 7, 30, 90 dias ou todo o histórico; comparação com o período anterior; precisão nas respondidas separada do aproveitamento total; contagem de acertos, erros, questões em branco, questões únicas, atividades, tempo e revisões.
+- Diagnóstico: análises por área, matéria e todos os assuntos/subassuntos informados nas questões; evolução visual; histórico de atividades com acesso ao resultado detalhado; aviso sobre amostras pequenas; motivos de erro autodeclarados; recomendações que criam tarefas.
+- Relatório: botão para imprimir ou salvar o painel de desempenho como PDF pelo diálogo de impressão do navegador.
+- Compatibilidade: não há alteração de estrutura do IndexedDB. A versão 1.5.0 atualiza o identificador do aplicativo e o cache do Service Worker, preservando os bancos locais e backups anteriores.
+- A estimativa inspirada na TRI continua experimental e só usa itens com parâmetros calibrados; não representa uma nota oficial.
