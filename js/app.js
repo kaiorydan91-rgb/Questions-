@@ -41,6 +41,7 @@ const state = {
   db: null, data: {}, page: 'home', importDraft: null, currentActivity: null,
   activityAnswers: new Map(), activityTimer: null, activityStart: null,
   reviewFilter: 'due', assetUrls: new Map(), restoreDraft: null, restoreConflicts: [], restoreChoices: {}, bankPage: 1, pendingBackup: null, finishingActivityId: null,
+  bankTab: 'questions', performancePeriod: 'all', performanceArea: '', performanceSubject: '', performanceTopic: '', importTaskDraft: null, selectedPackageKeys: new Set(),
   activityFilters: { areas: [], subjects: [], topics: [] },
   activityTopicPickerOpen: false, activityTopicSearch: '', longPressTimer: null, longPressFiredAt: 0, longPressPointerId: null
 };
@@ -217,7 +218,7 @@ function pageNavigate(page) {
   $$('.page').forEach(element => element.classList.toggle('active', element.dataset.pageId === page));
   $$('.nav-item[data-page]').forEach(element => element.classList.toggle('active', element.dataset.page === page));
   if (page === 'home') renderHome();
-  if (page === 'bank') renderBank();
+  if (page === 'bank') { renderBank(); renderPackageHistory(); setBankTab(state.bankTab); }
   if (page === 'activity') { if (state.currentActivity?.status === 'running') { renderSession(); startActivityTimer(); } else renderActivityBuilder(); }
   if (page === 'performance') renderPerformance();
   if (page === 'reviews') renderReviews();
@@ -230,7 +231,7 @@ function renderAll() {
   $('#todayLabel').textContent = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' }).format(new Date());
   // Only render the visible section. Other pages are rendered when opened.
   renderHome();
-  if (state.page === 'bank') renderBank();
+  if (state.page === 'bank') { renderBank(); renderPackageHistory(); setBankTab(state.bankTab); }
   if (state.page === 'activity') { if (state.currentActivity?.status === 'running') { renderSession(); startActivityTimer(); } else renderActivityBuilder(); }
   if (state.page === 'performance') renderPerformance();
   if (state.page === 'reviews') renderReviews();
@@ -409,7 +410,9 @@ function renderActivityTopicList() {
 }
 
 function renderActivityBuilder() {
+  renderPendingTasks();
   if (state.currentActivity?.status === 'running') {
+    $('#pendingTaskSection')?.classList.add('hidden');
     $('.activity-layout').classList.add('hidden');
     $('#activityNoQuestions').classList.add('hidden');
     $('#activitySession').classList.remove('hidden');
@@ -857,7 +860,21 @@ async function renderResult(activity) {
   const questions = activity.questionIds.map(questionById).filter(Boolean);
   await loadActivityAnswers(activity.id);
   const result = activity.result || {};
-  $('#activitySession').innerHTML = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">RESULTADO DA ATIVIDADE</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">Concluída em ${formatDate(activity.endedAt, true)} · ${durationLabel(result.durationSecs)}</div></div><button class="button secondary" data-action="new-activity">Nova atividade</button></div><article class="glass-card result-hero"><div class="eyebrow">APROVEITAMENTO</div><div class="result-score"><strong>${result.percentage ?? 0}%</strong><span>${result.correct ?? 0} acertos de ${result.total ?? 0} questões</span></div><div class="metric-row"><div class="metric"><strong>${result.wrong ?? 0}</strong><span>erros</span></div><div class="metric"><strong>${result.blank ?? 0}</strong><span>em branco</span></div><div class="metric"><strong>${Number(result.netScore ?? 0).toFixed(2).replace('.', ',')}</strong><span>pontuação líquida</span></div><div class="metric"><strong>${durationLabel(result.durationSecs)}</strong><span>tempo</span></div></div><div class="result-tri-row"><div><b>${result.triEstimate ? `θ ${result.triEstimate.theta.toFixed(2).replace('.',',')}` : 'θ indisponível'}</b></div><div><b>${result.difficultyConsistency ? `${result.difficultyConsistency.percentage}%` : '—'}</b></div></div></article><div class="eyebrow">REVISÃO DAS RESPOSTAS</div><div style="height:10px"></div><div>${questions.map((q,index) => {
+  const activityRecords = activityPerformanceRecords(activity);
+  const renderResultBreakdown = keyGetter => {
+    const map = new Map();
+    activityRecords.forEach(record => {
+      const key = keyGetter(record.question) || 'Não informada';
+      const item = map.get(key) || { total: 0, answered: 0, correct: 0, blank: 0 };
+      item.total++;
+      if (record.hasResponse) { item.answered++; if (record.isCorrect) item.correct++; }
+      else item.blank++;
+      map.set(key,item);
+    });
+    return [...map.entries()].sort((a,b)=>b[1].total-a[1].total || a[0].localeCompare(b[0],'pt-BR')).map(([name,item]) => `<div class="result-breakdown-row"><span><b>${escapeHTML(name)}</b><small>${item.correct}/${item.answered} acertos · ${item.blank} em branco · ${item.total} questões</small></span><strong>${item.answered ? `${Math.round(item.correct/item.answered*100)}%` : '—'}</strong></div>`).join('');
+  };
+  const resultBreakdown = `<section class="glass-card result-breakdown"><div class="eyebrow">DIAGNÓSTICO DA ATIVIDADE</div><div class="result-breakdown-grid"><div><h3>Por matéria</h3>${renderResultBreakdown(question=>question.subject||question.area)}</div><div><h3>Por dificuldade</h3>${renderResultBreakdown(question=>question.difficulty||'Sem nível')}</div></div></section>`;
+  $('#activitySession').innerHTML = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">RESULTADO DA ATIVIDADE</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">Concluída em ${formatDate(activity.endedAt, true)} · ${durationLabel(result.durationSecs)}</div></div><button class="button secondary" data-action="new-activity">Nova atividade</button></div><article class="glass-card result-hero"><div class="eyebrow">APROVEITAMENTO</div><div class="result-score"><strong>${result.percentage ?? 0}%</strong><span>${result.correct ?? 0} acertos de ${result.total ?? 0} questões</span></div><div class="metric-row"><div class="metric"><strong>${result.wrong ?? 0}</strong><span>erros</span></div><div class="metric"><strong>${result.blank ?? 0}</strong><span>em branco</span></div><div class="metric"><strong>${Number(result.netScore ?? 0).toFixed(2).replace('.', ',')}</strong><span>pontuação líquida</span></div><div class="metric"><strong>${durationLabel(result.durationSecs)}</strong><span>tempo</span></div></div><div class="result-tri-row"><div><b>${result.triEstimate ? `θ ${result.triEstimate.theta.toFixed(2).replace('.',',')}` : 'θ indisponível'}</b></div><div><b>${result.difficultyConsistency ? `${result.difficultyConsistency.percentage}%` : '—'}</b></div></div></article>${resultBreakdown}<div class="eyebrow">REVISÃO DAS RESPOSTAS</div><div style="height:10px"></div><div>${questions.map((q,index) => {
     const answer = state.activityAnswers.get(q.id) || {};
     const correctAnswer = getExpectedAnswer(q);
     const complete = responseIsComplete(q, answer.response);
@@ -867,9 +884,9 @@ async function renderResult(activity) {
     const selectedKey = String(answer.response || '').trim().toUpperCase();
     const selectedAlternativeExplanation = q.type === 'multiple_choice' ? (q.alternativeExplanations?.[selectedKey] || q.alternativeExplanations?.[selectedKey.toLowerCase()] || '') : '';
     const textBase = textBaseById(q.textBaseId);
-    return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${richText(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b><p>${richText(selectedAlternativeExplanation)}</p></div>` : ''}${q.explanation ? `<div class="full-explanation"><b>Resolução completa</b><p>${richText(q.explanation)}</p></div>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
+    return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${richText(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b><p>${richText(selectedAlternativeExplanation)}</p></div>` : ''}${q.explanation ? `<div class="full-explanation"><b>Resolução completa</b><p>${richText(q.explanation)}</p></div>` : ''}${complete && !responseIsCorrect(q,answer.response) ? `<label class="error-reason-inline"><span>O que melhor explica esse erro?</span><select data-error-reason data-answer-id="${safeAttr(answer.id)}"><option value="">Selecione o motivo</option><option value="content" ${answer.errorReason==='content'?'selected':''}>Falta de conteúdo</option><option value="interpretation" ${answer.errorReason==='interpretation'?'selected':''}>Interpretação do enunciado</option><option value="calculation" ${answer.errorReason==='calculation'?'selected':''}>Erro de cálculo</option><option value="confusion" ${answer.errorReason==='confusion'?'selected':''}>Confusão conceitual</option><option value="time" ${answer.errorReason==='time'?'selected':''}>Gestão do tempo</option><option value="insecurity" ${answer.errorReason==='insecurity'?'selected':''}>Insegurança na escolha</option><option value="other" ${answer.errorReason==='other'?'selected':''}>Outro motivo</option></select></label>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
   }).join('')}</div><div class="exam-bottom"><button class="button secondary" data-page="performance">Ver desempenho</button><button class="button primary" data-action="new-activity">Voltar ao gerador</button></div></div>`;
-  $('.activity-layout').classList.add('hidden'); $('#activityNoQuestions').classList.add('hidden'); $('#activitySession').classList.remove('hidden');
+  $('.activity-layout').classList.add('hidden'); $('#pendingTaskSection')?.classList.add('hidden'); $('#activityNoQuestions').classList.add('hidden'); $('#activitySession').classList.remove('hidden');
   for (const question of questions) {
     const marks = state.activityAnswers.get(question.id)?.highlights || [];
     applyTextMarks($(`[data-result-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement');
@@ -888,60 +905,160 @@ async function computeQuestionAccuracy() {
   return map;
 }
 function renderPerformance() {
-  const answers = completedAnswers();
-  const completedActivities = state.data.activities.filter(a => a.status === 'completed').sort((a,b) => Date.parse(a.endedAt || a.createdAt) - Date.parse(b.endedAt || b.createdAt));
-  $('#performanceEmpty').classList.toggle('hidden', answers.length > 0);
-  $('#performanceData').classList.toggle('hidden', answers.length === 0);
-  if (!answers.length) return;
-  const correct = answers.filter(a => a.isCorrect).length;
-  const wrong = answers.length - correct;
-  const pending = state.data.reviews.filter(r => r.status !== 'completed').length;
-  const totalStudySeconds = completedActivities.reduce((sum, activity) => sum + (Number(activity.durationSecs) || 0), 0);
-  $('#performanceMetrics').innerHTML = `<div class="metric-card"><strong>${Math.round(correct/answers.length*100)}%</strong><span>taxa de acerto</span></div><div class="metric-card"><strong>${correct}</strong><span>respostas corretas</span></div><div class="metric-card"><strong>${wrong}</strong><span>respostas incorretas</span></div><div class="metric-card"><strong>${pending}</strong><span>revisões pendentes</span></div><div class="metric-card"><strong>${durationLabel(totalStudySeconds)}</strong><span>tempo registrado em atividades</span></div>`;
+  const allCompleted = state.data.activities.filter(activity => activity.status === 'completed').sort((a,b) => Date.parse(a.endedAt || a.createdAt) - Date.parse(b.endedAt || b.createdAt));
+  const period = state.performancePeriod || 'all';
+  const cutoff = period === 'all' ? 0 : Date.now() - Number(period) * 86400000;
+  const completedActivities = allCompleted.filter(activity => Date.parse(activity.endedAt || activity.createdAt) >= cutoff);
+
+  const uniqueSorted = values => [...new Set(values.filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b),'pt-BR'));
+  const filterOptions = [
+    { id: 'performanceAreaFilter', stateKey: 'performanceArea', values: uniqueSorted(state.data.questions.map(question => question.area)), placeholder: 'Todas as áreas' },
+    { id: 'performanceSubjectFilter', stateKey: 'performanceSubject', values: uniqueSorted(state.data.questions.map(question => question.subject)), placeholder: 'Todas as matérias' },
+    { id: 'performanceTopicFilter', stateKey: 'performanceTopic', values: uniqueSorted(state.data.questions.flatMap(question => topicValues(question))), placeholder: 'Todos os assuntos' }
+  ];
+  for (const item of filterOptions) {
+    const select = $(`#${item.id}`);
+    if (!select) continue;
+    const selected = state[item.stateKey] || '';
+    select.innerHTML = `<option value="">${item.placeholder}</option>${item.values.map(value => `<option value="${safeAttr(value)}">${escapeHTML(value)}</option>`).join('')}`;
+    select.value = item.values.includes(selected) ? selected : '';
+    state[item.stateKey] = select.value;
+  }
+  const filters = { area: state.performanceArea, subject: state.performanceSubject, topic: state.performanceTopic };
+  const matchesQuestion = question => Boolean(question) && (!filters.area || question.area === filters.area) && (!filters.subject || question.subject === filters.subject) && (!filters.topic || topicValues(question).some(value => normalizeSearch(value) === normalizeSearch(filters.topic)));
+  const buildActivityData = activities => activities.map(activity => ({ activity, records: activityPerformanceRecords(activity).filter(record => matchesQuestion(record.question)) })).filter(item => item.records.length);
+  const activityData = buildActivityData(completedActivities);
+  const allRecords = activityData.flatMap(item => item.records);
+  const answeredRecords = allRecords.filter(record => record.hasResponse);
+  const unanswered = Math.max(0, allRecords.length - answeredRecords.length);
+  const correct = answeredRecords.filter(record => record.isCorrect).length;
+  const wrong = answeredRecords.length - correct;
+  const precision = answeredRecords.length ? Math.round(correct / answeredRecords.length * 100) : 0;
+  const overall = allRecords.length ? Math.round(correct / allRecords.length * 100) : 0;
+  const distinctQuestions = new Set(answeredRecords.map(record => record.question.id)).size;
+  const pending = state.data.reviews.filter(review => review.status !== 'completed').length;
+  const totalStudySeconds = activityData.reduce((sum, item) => sum + (Number(item.activity.durationSecs) || 0), 0);
+  const hasPerformance = allRecords.length > 0;
+  $('#performanceEmpty').classList.toggle('hidden', hasPerformance || allCompleted.length > 0);
+  $('#performanceNoResults')?.classList.toggle('hidden', hasPerformance || allCompleted.length === 0);
+  $('#performanceData').classList.toggle('hidden', !hasPerformance);
+  const periodControl = $('#performancePeriod');
+  if (periodControl && periodControl.value !== period) periodControl.value = period;
+  const periodLabel = period === 'all' ? 'todo o histórico' : `os últimos ${period} dias`;
+  const activeFilters = [filters.area,filters.subject,filters.topic].filter(Boolean);
+  $('#performancePeriodNote').textContent = `${activityData.length} atividades com questões correspondentes em ${periodLabel}.${activeFilters.length ? ` Filtros ativos: ${activeFilters.join(' · ')}.` : ''}`;
+  if (!hasPerformance) return;
+
+  const sampleLabel = answeredRecords.length < 10 ? 'Amostra pequena' : answeredRecords.length < 30 ? 'Amostra em formação' : 'Amostra mais consistente';
+  let comparisonMarkup = '<div class="metric-card"><strong>—</strong><span>comparação de períodos</span><small>Selecione 7, 30 ou 90 dias para comparar.</small></div>';
+  if (period !== 'all') {
+    const windowMs = Number(period) * 86400000;
+    const previousStart = Date.now() - windowMs * 2;
+    const previousActivities = allCompleted.filter(activity => {
+      const time = Date.parse(activity.endedAt || activity.createdAt);
+      return time >= previousStart && time < cutoff;
+    });
+    const previousRecords = buildActivityData(previousActivities).flatMap(item => item.records).filter(record => record.hasResponse);
+    if (previousRecords.length) {
+      const previousCorrect = previousRecords.filter(record => record.isCorrect).length;
+      const delta = precision - Math.round(previousCorrect / previousRecords.length * 100);
+      comparisonMarkup = `<div class="metric-card"><strong>${delta > 0 ? '+' : ''}${delta} pp</strong><span>variação da precisão</span><small>vs. ${period} dias anteriores, com os mesmos filtros</small></div>`;
+    } else comparisonMarkup = '<div class="metric-card"><strong>—</strong><span>período anterior</span><small>Sem respostas suficientes para comparar.</small></div>';
+  }
+  $('#performanceMetrics').innerHTML = `${comparisonMarkup}<div class="metric-card"><strong>${precision}%</strong><span>precisão nas respondidas</span><small>${sampleLabel} · ${answeredRecords.length} respostas</small></div><div class="metric-card"><strong>${overall}%</strong><span>aproveitamento total</span><small>${correct} acertos em ${allRecords.length} questões</small></div><div class="metric-card"><strong>${correct}</strong><span>respostas corretas</span></div><div class="metric-card"><strong>${wrong}</strong><span>respostas incorretas</span></div><div class="metric-card"><strong>${unanswered}</strong><span>questões em branco</span></div><div class="metric-card"><strong>${distinctQuestions}</strong><span>questões únicas respondidas</span></div><div class="metric-card"><strong>${activityData.length}</strong><span>atividades com questões no filtro</span></div><div class="metric-card"><strong>${durationLabel(totalStudySeconds)}</strong><span>${activeFilters.length ? 'duração das atividades correspondentes' : 'tempo de estudo registrado'}</span></div><div class="metric-card"><strong>${pending}</strong><span>revisões pendentes (geral)</span></div>`;
+
   const confidenceNames = { unsure: 'Com dúvida', guess: 'Chutei', confident: 'Confiante' };
-  const confidenceSummary = ['unsure','guess','confident'].map(level => {
-    const subset = answers.filter(answer => (answer.confidence || 'unsure') === level);
-    const hits = subset.filter(answer => answer.isCorrect).length;
-    return `<div class="confidence-stat"><span>${confidenceNames[level]}</span><b>${subset.length ? `${Math.round(hits/subset.length*100)}%` : '—'}</b><small>${hits}/${subset.length} acertos</small></div>`;
+  $('#confidenceStats').innerHTML = ['unsure','guess','confident'].map(level => {
+    const subset = answeredRecords.filter(record => (record.answer.confidence || 'unsure') === level);
+    const hits = subset.filter(record => record.isCorrect).length;
+    return `<div class="confidence-stat"><span>${confidenceNames[level]}</span><b>${subset.length ? `${Math.round(hits / subset.length * 100)}%` : '—'}</b><small>${hits}/${subset.length} acertos</small></div>`;
   }).join('');
-  $('#confidenceStats').innerHTML = confidenceSummary;
-  const areaStats = Object.keys(SUBJECTS).map(area => {
-    const ids = new Set(state.data.questions.filter(q => q.area === area).map(q => q.id));
-    const selected = answers.filter(a => ids.has(a.questionId));
-    return { area, correct: selected.filter(a => a.isCorrect).length, total: selected.length, percentage: selected.length ? Math.round(selected.filter(a => a.isCorrect).length / selected.length * 100) : 0 };
-  });
-  $('#areaBars').innerHTML = areaStats.map(item => `<div class="bar-item"><div class="bar-label"><span>${escapeHTML(item.area)}</span><b>${item.total ? `${item.percentage}% · ${item.total} respostas` : 'Sem dados'}</b></div><div class="bar-track"><i style="width:${item.percentage}%"></i></div></div>`).join('');
-  const subjectStats = Object.values(SUBJECTS).flat().map(subject => {
-    const ids = new Set(state.data.questions.filter(q => q.subject === subject).map(q => q.id));
-    const selected = answers.filter(a => ids.has(a.questionId));
-    const hits = selected.filter(a => a.isCorrect).length;
-    return { subject, total: selected.length, percentage: selected.length ? Math.round(hits / selected.length * 100) : 0 };
-  }).filter(item => item.total).sort((a,b) => b.total - a.total || a.subject.localeCompare(b.subject));
-  $('#subjectBars').innerHTML = subjectStats.length ? subjectStats.map(item => `<div class="bar-item"><div class="bar-label"><span>${escapeHTML(item.subject)}</span><b>${item.percentage}% · ${item.total}</b></div><div class="bar-track"><i style="width:${item.percentage}%"></i></div></div>`).join('') : '<div class="empty-inline">Ainda não há respostas por matéria.</div>';
+
+  const renderDistribution = (records, keyGetter, targetId, emptyText) => {
+    const map = new Map();
+    records.forEach(record => {
+      const key = keyGetter(record.question) || 'Não informada';
+      const item = map.get(key) || { total: 0, correct: 0 };
+      item.total++;
+      if (record.isCorrect) item.correct++;
+      map.set(key,item);
+    });
+    const stats = [...map.entries()].map(([name,item]) => ({ name,...item, percentage: Math.round(item.correct / item.total * 100) })).sort((a,b) => b.total - a.total || a.name.localeCompare(b.name,'pt-BR'));
+    $(`#${targetId}`).innerHTML = stats.length ? stats.map(item => `<div class="bar-item"><div class="bar-label"><span>${escapeHTML(item.name)}</span><b>${item.percentage}% · ${item.total} respostas</b></div><div class="bar-track"><i style="width:${item.percentage}%"></i></div></div>`).join('') : `<div class="empty-inline">${emptyText}</div>`;
+  };
+  renderDistribution(answeredRecords, question => question.area, 'areaBars', 'Sem respostas por área no período.');
+  renderDistribution(answeredRecords, question => question.subject, 'subjectBars', 'Sem respostas por matéria no período.');
+  renderDistribution(answeredRecords, question => question.difficulty, 'difficultyBars', 'Sem respostas classificadas por dificuldade.');
+
   const topicMap = new Map();
-  answers.forEach(answer => {
-    const question = questionById(answer.questionId); if (!question) return;
-    const key = `${question.subject || question.area} · ${question.primaryTopic || 'Sem assunto'}`;
-    const item = topicMap.get(key) || { total: 0, correct: 0 };
-    item.total++; if (answer.isCorrect) item.correct++;
-    topicMap.set(key,item);
-  });
-  const weak = [...topicMap.entries()].map(([name,item]) => ({name,...item,accuracy:item.correct/item.total})).sort((a,b)=>a.accuracy-b.accuracy).slice(0,6);
-  $('#weakTopics').innerHTML = weak.length ? weak.map(item => `<div class="compact-item"><span><b>${escapeHTML(item.name)}</b><small>${item.correct}/${item.total} acertos</small></span><strong>${Math.round(item.accuracy*100)}%</strong></div>`).join('') : '<div class="empty-inline">Ainda não há assuntos suficientes.</div>';
-  const errorPatterns = new Map();
-  answers.filter(answer => answer.isCorrect === false).forEach(answer => {
-    const question = questionById(answer.questionId);
-    for (const category of question?.errorCategories || []) {
-      const label = String(category).trim();
-      if (!label) continue;
-      errorPatterns.set(label, (errorPatterns.get(label) || 0) + 1);
+  answeredRecords.forEach(record => {
+    const question = record.question;
+    const topics = topicValues(question);
+    for (const topic of topics.length ? topics : ['Sem assunto']) {
+      const key = `${question.subject || question.area || 'Conteúdo'} · ${topic}`;
+      const item = topicMap.get(key) || { subject: question.subject || question.area || 'Conteúdo', topic, total: 0, correct: 0 };
+      item.total++; if (record.isCorrect) item.correct++;
+      topicMap.set(key,item);
     }
   });
-  const rankedErrors = [...errorPatterns.entries()].sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0])).slice(0,8);
-  $('#errorPatternList').innerHTML = rankedErrors.length ? rankedErrors.map(([name,count]) => `<div class="compact-item"><span><b>${escapeHTML(name)}</b><small>Questões incorretas associadas</small></span><strong>${count}</strong></div>`).join('') : '<div class="empty-inline">Sem dados.</div>';
-  $('#activityHistory').innerHTML = completedActivities.slice().reverse().slice(0,8).map(item => `<div class="history-row"><span><b>${escapeHTML(item.title)}</b><small>${formatDate(item.endedAt || item.createdAt)} · ${item.result?.total || 0} questões · ${durationLabel(item.durationSecs)}</small></span><span class="history-score">${item.result?.percentage ?? 0}%</span></div>`).join('') || '<div class="empty-inline">Nenhuma atividade concluída.</div>';
-  renderTriEstimate(answers);
+  const topicStats = [...topicMap.entries()].map(([name,item]) => ({ name,...item, accuracy: item.correct / item.total })).sort((a,b) => a.accuracy - b.accuracy || b.total - a.total);
+  $('#weakTopics').innerHTML = topicStats.length ? topicStats.slice(0,8).map(item => `<div class="compact-item"><span><b>${escapeHTML(item.name)}</b><small>${item.correct}/${item.total} acertos · ${item.total < 5 ? 'Amostra pequena; diagnóstico preliminar' : item.accuracy < .6 ? 'Prioridade de retomada' : item.accuracy < .8 ? 'Reforçar e praticar' : 'Desempenho consistente'}</small></span><strong>${Math.round(item.accuracy * 100)}%</strong></div>`).join('') : '<div class="empty-inline">Ainda não há assuntos suficientes.</div>';
+
+  const errorPatterns = new Map();
+  answeredRecords.filter(record => !record.isCorrect).forEach(record => {
+    const rawCategories = record.question?.errorCategories;
+    const categories = Array.isArray(rawCategories) ? rawCategories : (typeof rawCategories === 'string' ? [rawCategories] : []);
+    for (const category of categories) {
+      const label = String(category).trim();
+      if (label) errorPatterns.set(label,(errorPatterns.get(label) || 0) + 1);
+    }
+  });
+  const rankedErrors = [...errorPatterns.entries()].sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0,8);
+  $('#errorPatternList').innerHTML = rankedErrors.length ? rankedErrors.map(([name,count]) => `<div class="compact-item"><span><b>${escapeHTML(name)}</b><small>Metadado associado às questões incorretas</small></span><strong>${count}</strong></div>`).join('') : '<div class="empty-inline">As questões erradas não possuem categorias classificadas.</div>';
+
+  const errorReasons = new Map();
+  answeredRecords.filter(record => !record.isCorrect && record.answer.errorReason).forEach(record => {
+    const reason = errorReasonLabel(record.answer.errorReason);
+    errorReasons.set(reason,(errorReasons.get(reason) || 0) + 1);
+  });
+  const reasonEntries = [...errorReasons.entries()].sort((a,b) => b[1] - a[1]);
+  $('#errorReasonList').innerHTML = reasonEntries.length ? reasonEntries.map(([name,count]) => `<div class="compact-item"><span><b>${escapeHTML(name)}</b><small>Motivo informado pelo estudante</small></span><strong>${count}</strong></div>`).join('') : '<div class="empty-inline">Ao revisar uma resposta incorreta, informe o motivo para criar este diagnóstico.</div>';
+
+  const trend = activityData.slice(-12);
+  if (trend.length) {
+    const w = 560, h = 150, pad = 22;
+    const coords = trend.map((item,index) => {
+      const itemCorrect = item.records.filter(record => record.hasResponse && record.isCorrect).length;
+      const percentage = Math.round(itemCorrect / item.records.length * 100);
+      return { x: trend.length === 1 ? w / 2 : pad + index * (w - 2 * pad) / (trend.length - 1), y: h - pad - (percentage / 100) * (h - 2 * pad), value: percentage, label: item.activity.title || 'Atividade' };
+    });
+    const polyline = coords.map(point => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ');
+    $('#performanceTrend').innerHTML = `<div class="trend-summary"><b>${coords.at(-1).value}%</b><span>aproveitamento na última atividade · ${coords.length} pontos no gráfico${activeFilters.length ? ' · filtros aplicados' : ''}</span></div><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Evolução do aproveitamento nas atividades concluídas"><line x1="${pad}" y1="${pad}" x2="${w-pad}" y2="${pad}" class="trend-grid-line"/><line x1="${pad}" y1="${h/2}" x2="${w-pad}" y2="${h/2}" class="trend-grid-line"/><line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" class="trend-grid-line"/><polyline points="${polyline}" class="trend-line"/>${coords.map(point => `<circle cx="${point.x}" cy="${point.y}" r="4" class="trend-point"><title>${escapeHTML(point.label)}: ${point.value}%</title></circle>`).join('')}</svg><div class="trend-axis"><span>0%</span><span>50%</span><span>100%</span></div>`;
+  } else $('#performanceTrend').innerHTML = '<div class="empty-inline">Conclua atividades para acompanhar sua evolução.</div>';
+
+  const recommendations = topicStats.filter(item => item.total >= 3 && item.accuracy < .8).slice(0,5);
+  $('#studyRecommendations').innerHTML = recommendations.map(item => {
+    const priority = item.total >= 5 && item.accuracy < .6;
+    const label = priority ? 'Prioridade alta' : 'Consolidar';
+    const ids = state.data.questions.filter(question => (question.subject || question.area || 'Conteúdo') === item.subject && topicValues(question).some(value => normalizeSearch(value) === normalizeSearch(item.topic))).map(question => question.id);
+    return `<article class="recommendation-item"><div><span class="tag ${priority ? 'danger-tag' : 'warning-tag'}">${label}</span><b>${escapeHTML(item.name)}</b><small>${Math.round(item.accuracy * 100)}% de precisão · ${item.total} respostas analisadas${item.total < 5 ? ' · amostra ainda limitada' : ''}</small></div><button class="button small secondary" data-action="create-pending-topic-task" data-subject="${safeAttr(item.subject)}" data-topic="${safeAttr(item.topic)}" ${ids.length ? '' : 'disabled'}>Criar tarefa</button></article>`;
+  }).join('') || '<div class="empty-inline">Ainda não há dados suficientes para recomendações confiáveis. Continue resolvendo atividades para formar seu diagnóstico.</div>';
+
+  $('#activityHistory').innerHTML = activityData.slice().reverse().map(item => {
+    const records = item.records;
+    const answered = records.filter(record => record.hasResponse).length;
+    const hits = records.filter(record => record.hasResponse && record.isCorrect).length;
+    const errors = records.filter(record => record.hasResponse && !record.isCorrect).length;
+    const blanks = records.length - answered;
+    const score = Math.round(hits / records.length * 100);
+    return `<div class="history-row"><span><b>${escapeHTML(item.activity.title)}</b><small>${formatDate(item.activity.endedAt || item.activity.createdAt)} · ${hits} acertos · ${errors} erros · ${blanks} em branco · ${records.length} questões no filtro · ${durationLabel(item.activity.durationSecs)}</small></span><span class="activity-history-actions"><strong class="history-score">${score}%</strong><button class="text-button" data-action="view-activity-result" data-id="${safeAttr(item.activity.id)}">Ver resultado completo</button></span></div>`;
+  }).join('') || '<div class="empty-inline">Nenhuma atividade concluída no período.</div>';
+  renderTriEstimate(answeredRecords.map(record => record.answer), activityData.map(item => item.activity), filters);
 }
+function errorReasonLabel(value) {
+  return ({ content:'Falta de conteúdo', interpretation:'Interpretação do enunciado', calculation:'Erro de cálculo', confusion:'Confusão conceitual', time:'Gestão do tempo', insecurity:'Insegurança na escolha', other:'Outro motivo' })[value] || 'Não informado';
+}
+
 function validTriParameters(question) {
   const tri = question?.triParameters;
   return Boolean(tri && ['a','b','c'].every(key => tri[key] !== null && tri[key] !== undefined && tri[key] !== '') && Number.isFinite(Number(tri.a)) && Number.isFinite(Number(tri.b)) && Number.isFinite(Number(tri.c)) && Number(tri.a) > 0 && Number(tri.c) >= 0 && Number(tri.c) < 1);
@@ -990,13 +1107,16 @@ function activityPerformanceRecords(activity) {
     return { question, answer, hasResponse, isCorrect: hasResponse && responseIsCorrect(question, answer.response) };
   }).filter(item => item.question);
 }
-function renderTriEstimate(_answers) {
-  const completedActivities = state.data.activities.filter(item => item.status === 'completed').sort((a,b) => Date.parse(b.endedAt || b.createdAt) - Date.parse(a.endedAt || a.createdAt));
-  const latestActivity = completedActivities[0];
-  const latestRecords = latestActivity ? activityPerformanceRecords(latestActivity) : [];
+function renderTriEstimate(_answers, selectedActivities = null, filters = {}) {
+  const completedActivities = Array.isArray(selectedActivities) ? selectedActivities.slice().sort((a,b) => Date.parse(b.endedAt || b.createdAt) - Date.parse(a.endedAt || a.createdAt)) : state.data.activities.filter(item => item.status === 'completed').sort((a,b) => Date.parse(b.endedAt || b.createdAt) - Date.parse(a.endedAt || a.createdAt));
+  const matchesQuestion = question => Boolean(question) && (!filters.area || question.area === filters.area) && (!filters.subject || question.subject === filters.subject) && (!filters.topic || topicValues(question).some(value => normalizeSearch(value) === normalizeSearch(filters.topic)));
+  const recordsForActivity = activity => activityPerformanceRecords(activity).filter(record => matchesQuestion(record.question));
+  const relevantActivities = completedActivities.filter(activity => recordsForActivity(activity).length);
+  const latestActivity = relevantActivities[0];
+  const latestRecords = latestActivity ? recordsForActivity(latestActivity) : [];
   let calibrated = null;
-  for (const activity of completedActivities) {
-    const estimate = estimateTriTheta(activityPerformanceRecords(activity));
+  for (const activity of relevantActivities) {
+    const estimate = estimateTriTheta(recordsForActivity(activity));
     if (estimate) { calibrated = { ...estimate, activity }; break; }
   }
   const consistency = calculateDifficultyConsistency(latestRecords);
@@ -1048,12 +1168,211 @@ async function renderSettings() {
     const total = Number(item.packageQuestionCount) || ids.length || Number(item.importedCount) || 0;
     const canCreate = ids.length > 0 && ['Concluída', 'Parcial'].includes(item.status || 'Concluída');
     const unavailable = '';
-    return `<div class="history-row import-history-row"><div class="import-history-main"><b>${escapeHTML(item.packageName || item.fileName || 'Operação')}</b><small>${formatDate(item.createdAt, true)} · ${escapeHTML(item.operation || 'Importação')} · ${total} questões no pacote</small>${unavailable}</div><div class="import-history-actions"><span class="tag peach">${escapeHTML(item.status || 'Concluída')}</span>${canCreate ? `<button class="button primary" type="button" data-action="create-activity-from-import" data-id="${safeAttr(item.id)}">Criar atividade ↗</button>` : ''}</div></div>`;
+    return `<div class="history-row import-history-row"><div class="import-history-main"><b>${escapeHTML(item.packageName || item.fileName || 'Operação')}</b><small>${formatDate(item.createdAt, true)} · ${escapeHTML(item.operation || 'Importação')} · ${total} questões no pacote</small>${unavailable}</div><div class="import-history-actions"><span class="tag peach">${escapeHTML(item.status || 'Concluída')}</span>${canCreate ? `<button class="button primary" type="button" data-action="create-task-from-record" data-id="${safeAttr(item.id)}">Criar tarefa ↗</button>` : ''}<button class="button small secondary" type="button" data-action="remove-import-history" data-id="${safeAttr(item.id)}">Remover histórico</button></div></div>`;
   }).join('');
+}
+function getImportGroups() {
+  const groups = new Map();
+  for (const record of state.data.imports || []) {
+    const key = String(record.packageId || record.id);
+    const group = groups.get(key) || { key, packageId: record.packageId || null, name: record.packageName || record.fileName || 'Pacote importado', records: [], ids: new Set(), createdAt: record.createdAt || '', status: record.status || 'Concluída', fileNames: new Set() };
+    group.records.push(record);
+    group.name = record.packageName || group.name;
+    if (record.fileName) group.fileNames.add(record.fileName);
+    if (!group.createdAt || Date.parse(record.createdAt) < Date.parse(group.createdAt)) group.createdAt = record.createdAt;
+    if (Date.parse(record.createdAt || 0) >= Date.parse(group.latestAt || 0)) { group.latestAt = record.createdAt; group.status = record.status || 'Concluída'; }
+    importRecordQuestionIds(record).forEach(id => group.ids.add(id));
+    (Array.isArray(record.questionIds) ? record.questionIds : []).forEach(id => { if (questionById(id)) group.ids.add(id); });
+    groups.set(key,group);
+  }
+  return [...groups.values()].map(group => ({ ...group, ids: [...group.ids], records: group.records.sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)) }));
+}
+function setBankTab(tab) {
+  state.bankTab = tab === 'packages' ? 'packages' : 'questions';
+  const questions = $('#bankQuestionsView'); const packages = $('#bankPackagesView');
+  if (questions) questions.classList.toggle('hidden',state.bankTab !== 'questions');
+  if (packages) packages.classList.toggle('hidden',state.bankTab !== 'packages');
+  $$('[data-bank-tab]').forEach(button => {
+    const active = button.dataset.bankTab === state.bankTab;
+    button.classList.toggle('active',active); button.setAttribute('aria-selected',String(active));
+  });
+}
+function renderPackageHistory() {
+  const host = $('#packageHistory'); if (!host) return;
+  let groups = getImportGroups();
+  const query = normalizeSearch($('#packageSearch')?.value || '');
+  const status = $('#packageStatusFilter')?.value || '';
+  const sort = $('#packageSort')?.value || 'recent';
+  groups = groups.filter(group => (!query || normalizeSearch([group.name,group.packageId,...group.fileNames,...group.records.map(item=>item.operation)].join(' ')).includes(query)) && (!status || group.status === status));
+  groups.sort((a,b)=> sort === 'oldest' ? Date.parse(a.createdAt)-Date.parse(b.createdAt) : sort === 'largest' ? b.ids.length-a.ids.length : sort === 'name' ? a.name.localeCompare(b.name,'pt-BR') : Date.parse(b.latestAt || b.createdAt)-Date.parse(a.latestAt || a.createdAt));
+  const allGroups = getImportGroups();
+  const totalQuestions = new Set(allGroups.flatMap(group=>group.ids)).size;
+  $('#packageOverview').innerHTML = `<div class="metric-card"><strong>${allGroups.length}</strong><span>pacotes registrados</span></div><div class="metric-card"><strong>${totalQuestions.toLocaleString('pt-BR')}</strong><span>questões vinculadas a pacotes</span></div><div class="metric-card"><strong>${state.data.imports.length}</strong><span>operações no histórico</span></div>`;
+  $('#packageCount').textContent = `${groups.length} ${groups.length===1?'pacote encontrado':'pacotes encontrados'}`;
+  $('#packageHistoryEmpty').classList.toggle('hidden',groups.length>0);
+  const selectedCount=state.selectedPackageKeys.size; const combineButton=$('#combineSelectedPackages'); if(combineButton){combineButton.disabled=!selectedCount;combineButton.textContent=selectedCount?`Montar tarefa (${selectedCount})`:'Montar tarefa com selecionados';}
+  host.innerHTML = groups.map(group => {
+    const shared = group.ids.filter(id => allGroups.some(other=>other.key!==group.key && other.ids.includes(id))).length;
+    const files = [...group.fileNames].join(' · ');
+    const packageQuestions=group.ids.map(id=>questionById(id)).filter(Boolean);
+    const imageQuestions=packageQuestions.filter(question=>(question.images||[]).length>0).length;
+    const areaLabels=[...new Set(packageQuestions.map(question=>question.area).filter(Boolean))];
+    const subjectLabels=[...new Set(packageQuestions.map(question=>question.subject).filter(Boolean))];
+    return `<article class="package-card"><div class="package-card-heading"><div class="package-card-title-wrap"><label class="package-select"><input type="checkbox" data-package-select="${safeAttr(group.key)}" ${state.selectedPackageKeys.has(group.key)?'checked':''}/><span>Incluir na seleção</span></label><span class="tag peach">${escapeHTML(group.status)}</span><h3>${escapeHTML(group.name)}</h3><p>${formatDate(group.latestAt || group.createdAt,true)} · ${group.ids.length} questões · ${imageQuestions} com imagens · ${group.records.length} ${group.records.length===1?'importação':'operações'}</p>${areaLabels.length?`<small>Áreas: ${escapeHTML(areaLabels.slice(0,3).join(', '))}${areaLabels.length>3?` +${areaLabels.length-3}`:''}</small>`:''}${subjectLabels.length?`<small>Matérias: ${escapeHTML(subjectLabels.slice(0,4).join(', '))}${subjectLabels.length>4?` +${subjectLabels.length-4}`:''}</small>`:''}${files?`<small>Arquivos: ${escapeHTML(files)}</small>`:''}<small>${shared?`${shared} questões compartilhadas com outros pacotes`:'Sem compartilhamento identificado entre pacotes'}</small></div><span class="package-icon">▤</span></div><div class="package-actions"><button class="button small secondary" data-action="package-details" data-package-key="${safeAttr(group.key)}">Ver questões</button><button class="button small primary" data-action="create-task-from-package" data-package-key="${safeAttr(group.key)}" ${group.ids.length?'':'disabled'}>Criar tarefa</button><button class="button small secondary" data-action="remove-package-history" data-package-key="${safeAttr(group.key)}">Remover histórico</button><button class="button small danger" data-action="delete-package" data-package-key="${safeAttr(group.key)}">Excluir pacote</button></div></article>`;
+  }).join('');
+}
+function findImportGroup(key) { return getImportGroups().find(group=>group.key===String(key)); }
+function openPackageDetails(key) {
+  const group=findImportGroup(key); if(!group) return toast('Pacote não encontrado.');
+  const rows=group.ids.map(id=>questionById(id)).filter(Boolean).map((question,index)=>`<article class="package-question-row"><span class="question-number">${index+1}</span><div><div class="question-meta"><span class="tag peach">${escapeHTML(question.subject||question.area)}</span><span class="tag">${escapeHTML(question.difficulty||'Sem nível')}</span></div><b>${escapeHTML(question.id)}</b><p>${escapeHTML(String(question.statement||'').slice(0,220))}${String(question.statement||'').length>220?'…':''}</p><small>${escapeHTML(question.primaryTopic||'Sem assunto')} · ${question.images?.length||0} imagens</small></div><button class="button small secondary" data-open-question="${safeAttr(question.id)}">Abrir</button></article>`).join('');
+  openModal(group.name,`<div class="package-detail-summary"><b>${group.ids.length} questões</b><span>${group.records.length} registros de importação · ${formatDate(group.latestAt||group.createdAt,true)}</span></div><div class="package-question-list">${rows||'<div class="empty-inline">Nenhuma questão deste pacote está disponível.</div>'}</div>`,`<button class="button secondary" data-action="close-modal">Fechar</button><button class="button primary" data-action="create-task-from-package" data-package-key="${safeAttr(group.key)}">Criar tarefa ↗</button>`,'DETALHES DO PACOTE');
+}
+async function removeImportHistoryRecord(id) {
+  const record=state.data.imports.find(item=>item.id===id); if(!record) return;
+  if(!confirm(`Remover somente este registro de importação (${record.packageName||record.fileName||'pacote'})? As questões, imagens, atividades e respostas serão preservadas.`)) return;
+  const groupKey = String(record.packageId || record.id);
+  await deleteRecord(state.db,'imports',id);
+  if (!state.data.imports.some(item => String(item.packageId || item.id) === groupKey && item.id !== id)) state.selectedPackageKeys.delete(groupKey);
+  await refreshData();
+  if(state.page==='bank') renderPackageHistory();
+  if(state.page==='settings') await renderSettings();
+  toast('Registro removido. O conteúdo do banco foi preservado.');
+}
+async function deleteImportPackage(key) {
+  const group=findImportGroup(key); if(!group) return toast('Pacote não encontrado.');
+  const targetRecordIds=new Set(group.records.map(record=>record.id));
+  const targetCollectionIds=new Set(group.packageId ? state.data.collections.filter(collection=>collection.type==='sourceExam' && collection.packageId===group.packageId).map(collection=>collection.id) : []);
+  const outsideImportRefs=new Set();
+  state.data.imports.filter(record=>!targetRecordIds.has(record.id)).forEach(record=>importRecordQuestionIds(record).forEach(id=>outsideImportRefs.add(id)));
+  const outsideCollectionRefs=new Set();
+  state.data.collections.filter(collection=>!targetCollectionIds.has(collection.id)).forEach(collection=>[...(collection.questionIds||[]),...(collection.originalOrder||[])].forEach(id=>outsideCollectionRefs.add(id)));
+  const activityRefs=new Set(); state.data.activities.forEach(activity=>(activity.questionIds||[]).forEach(id=>activityRefs.add(id)));
+  const answerRefs=new Set(state.data.answers.map(answer=>answer.questionId).filter(Boolean));
+  const reviewRefs=new Set(state.data.reviews.map(review=>review.questionId).filter(Boolean));
+  const noteRefs=new Set(state.data.notes.flatMap(note=>[note.questionId,...(note.questionIds||[])]).filter(Boolean));
+  const favoriteRefs=new Set(state.data.questions.filter(question=>question.favorite).map(question=>question.id));
+  const aliasRefs=new Set(state.data.aliases.map(alias=>alias.questionId).filter(Boolean));
+  const protectedRefs=new Set([...outsideImportRefs,...outsideCollectionRefs,...activityRefs,...answerRefs,...reviewRefs,...noteRefs,...favoriteRefs,...aliasRefs]);
+  const removableIds=group.ids.filter(id=>!protectedRefs.has(id));
+  const preservedIds=group.ids.filter(id=>protectedRefs.has(id));
+  const questionMap=new Map(state.data.questions.map(question=>[question.id,question]));
+  const removedQuestions=removableIds.map(id=>questionMap.get(id)).filter(Boolean);
+  const remainingQuestions=state.data.questions.filter(question=>!removableIds.includes(question.id));
+  const remainingAssetIds=new Set(remainingQuestions.flatMap(question=>(question.images||[]).map(image=>image.assetId).filter(Boolean)));
+  const candidateAssetIds=new Set(removedQuestions.flatMap(question=>(question.images||[]).map(image=>image.assetId).filter(Boolean)));
+  const removableAssetIds=[...candidateAssetIds].filter(id=>!remainingAssetIds.has(id));
+  const remainingTextBaseIds=new Set(remainingQuestions.map(question=>question.textBaseId).filter(Boolean));
+  const candidateTextBaseIds=new Set(removedQuestions.map(question=>question.textBaseId).filter(Boolean));
+  const removableTextBaseIds=[...candidateTextBaseIds].filter(id=>!remainingTextBaseIds.has(id));
+  const label=`${group.name}\n\nRegistros do histórico: ${group.records.length}\nQuestões exclusivas a excluir: ${removableIds.length}\nQuestões preservadas por compartilhamento, favoritos, aliases ou uso: ${preservedIds.length}\nArquivos de imagem sem outros vínculos: ${removableAssetIds.length}\nTextos-base sem outros vínculos: ${removableTextBaseIds.length}\n\nAs atividades, respostas, revisões, favoritos, aliases e coleções que dependem de questões serão preservadas.`;
+  if(!confirm(`Excluir este pacote e seu conteúdo exclusivo?\n\n${label}\n\nEsta ação não pode ser desfeita. Faça um backup antes de continuar.`)) return;
+  state.selectedPackageKeys.delete(group.key);
+  await deleteRecords(state.db,'imports',[...targetRecordIds]);
+  if(targetCollectionIds.size) await deleteRecords(state.db,'collections',[...targetCollectionIds]);
+  if(removableIds.length) await deleteRecords(state.db,'questions',removableIds);
+  if(removableAssetIds.length){ await deleteRecords(state.db,'assets',removableAssetIds); await deleteRecords(state.db,'assetBlobs',removableAssetIds); }
+  if(removableTextBaseIds.length) await deleteRecords(state.db,'textBases',removableTextBaseIds);
+  const aliasIds=state.data.aliases.filter(alias=>removableIds.includes(alias.questionId)).map(alias=>alias.alias);
+  if(aliasIds.length) await deleteRecords(state.db,'aliases',aliasIds);
+  clearAssetUrlCache(); await refreshData();
+  if(state.page==='bank') renderPackageHistory();
+  toast(`Pacote removido. ${removableIds.length} questões exclusivas excluídas e ${preservedIds.length} preservadas.`);
+}
+function openImportTaskBuilder(key) {
+  const group=findImportGroup(key); if(!group) return toast('Pacote não encontrado.');
+  openTaskBuilderForIds(group.name,group.ids,{type:'package',packageKey:group.key});
+}
+function openCombinedPackageTaskBuilder() {
+  const groups=getImportGroups().filter(group=>state.selectedPackageKeys.has(group.key));
+  const ids=[...new Set(groups.flatMap(group=>group.ids))];
+  if(!ids.length) return toast('Selecione ao menos um pacote com questões disponíveis.');
+  openTaskBuilderForIds(`${groups.length} pacotes selecionados`,ids,{type:'packages',packageKeys:groups.map(group=>group.key)});
+}
+function openTaskBuilderForIds(packageName,allIds,source) {
+  const ids=allIds.filter(id=>questionById(id)); if(!ids.length) return toast('Não há questões disponíveis nesta seleção.');
+  state.importTaskDraft={packageKey:source.packageKey||null,packageName,source,ids,selectedIds:new Set(),manualPage:0};
+  const questions=ids.map(id=>questionById(id)).filter(Boolean);
+  const areas=[...new Set(questions.map(q=>q.area).filter(Boolean))].sort();
+  const subjects=[...new Set(questions.map(q=>q.subject).filter(Boolean))].sort();
+  const topics=[...new Set(questions.flatMap(q=>topicValues(q)))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const options=(values,label)=>`<option value="">${label}</option>${values.map(value=>`<option value="${safeAttr(value)}">${escapeHTML(value)}</option>`).join('')}`;
+  const body=`<div class="task-builder-intro"><b>${ids.length} questões disponíveis</b><span>${escapeHTML(packageName)}</span></div><label class="field-label">Nome da tarefa<input id="packageTaskTitle" maxlength="100" value="${safeAttr(`Pacote · ${packageName}`)}"/></label><div class="field-grid package-task-filters"><label><span>Modo de seleção</span><select id="packageTaskMode"><option value="all">Todas as questões disponíveis</option><option value="random">Quantidade aleatória</option><option value="manual">Selecionar manualmente</option></select></label><label><span>Área</span><select id="packageTaskArea">${options(areas,'Todas as áreas')}</select></label><label><span>Matéria</span><select id="packageTaskSubject">${options(subjects,'Todas as matérias')}</select></label><label><span>Assunto / subassunto</span><select id="packageTaskTopic">${options(topics,'Todos os assuntos')}</select></label><label><span>Dificuldade</span><select id="packageTaskDifficulty"><option value="">Todas</option><option>Fácil</option><option>Média</option><option>Difícil</option></select></label></div><label class="field-label hidden" id="packageTaskQuantityWrap"><span>Quantidade de questões aleatórias</span><input id="packageTaskQuantity" type="number" min="1" max="${ids.length}" value="${Math.min(20,ids.length)}"/></label><div class="task-manual-controls hidden" id="packageTaskManualControls"><div><b>Seleção manual</b><small id="packageTaskSelectionCount">0 selecionadas</small></div><div class="inline-actions"><button class="text-button" type="button" data-action="task-select-visible">Selecionar página</button><button class="text-button" type="button" data-action="task-clear-selection">Limpar seleção</button></div><div id="packageTaskQuestionList" class="task-question-list"></div><div class="task-list-pagination" id="packageTaskPagination"></div></div><label class="check-row"><input id="packageTaskShuffle" type="checkbox"/><span><b>Embaralhar a ordem das questões</b></span></label><div class="task-selection-summary" id="packageTaskSummary">Todas as questões do pacote serão incluídas.</div>`;
+  openModal('Criar tarefa a partir do pacote',body,`<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button secondary" data-action="resolve-import-task">Resolver agora ↗</button><button class="button primary" data-action="save-import-task">Adicionar às tarefas</button>`,'GERADOR DE TAREFAS');
+  renderImportTaskBuilder();
+}
+function taskBuilderCandidates() {
+  const draft=state.importTaskDraft; if(!draft) return [];
+  const area=$('#packageTaskArea')?.value||'',subject=$('#packageTaskSubject')?.value||'',topic=$('#packageTaskTopic')?.value||'',difficulty=$('#packageTaskDifficulty')?.value||'';
+  return draft.ids.map(id=>questionById(id)).filter(Boolean).filter(q=>(!area||q.area===area)&&(!subject||q.subject===subject)&&(!topic||topicValues(q).some(value=>normalizeSearch(value)===normalizeSearch(topic)))&&(!difficulty||q.difficulty===difficulty));
+}
+function renderImportTaskBuilder() {
+  const draft=state.importTaskDraft; if(!draft||!$('#packageTaskMode')) return;
+  const candidates=taskBuilderCandidates();
+  const mode=$('#packageTaskMode').value;
+  $('#packageTaskQuantityWrap').classList.toggle('hidden',mode!=='random');
+  $('#packageTaskManualControls').classList.toggle('hidden',mode!=='manual');
+  const max=candidates.length;
+  const quantity=$('#packageTaskQuantity'); if(quantity){quantity.max=String(max);quantity.value=String(Math.min(Math.max(1,Number(quantity.value)||1),Math.max(1,max)));}
+  const selected=[...draft.selectedIds].filter(id=>draft.ids.includes(id));
+  $('#packageTaskSelectionCount').textContent=`${selected.length} selecionadas`;
+  const pageSize=50; const pageCount=Math.max(1,Math.ceil(candidates.length/pageSize)); draft.manualPage=Math.min(draft.manualPage,pageCount-1);
+  const visible=candidates.slice(draft.manualPage*pageSize,(draft.manualPage+1)*pageSize);
+  $('#packageTaskQuestionList').innerHTML=visible.map(q=>`<label class="task-question-choice"><input type="checkbox" data-package-task-question="${safeAttr(q.id)}" ${draft.selectedIds.has(q.id)?'checked':''}/><span><b>${escapeHTML(q.id)} · ${escapeHTML(q.subject||q.area)}</b><small>${escapeHTML(q.primaryTopic||'Sem assunto')} · ${escapeHTML(q.difficulty||'Sem nível')}</small><small>${escapeHTML(String(q.statement||'').slice(0,120))}${String(q.statement||'').length>120?'…':''}</small></span></label>`).join('')||'<div class="empty-inline">Nenhuma questão corresponde aos filtros.</div>';
+  $('#packageTaskPagination').innerHTML=pageCount>1?`<button class="button small secondary" data-task-manual-page="${Math.max(0,draft.manualPage-1)}" ${draft.manualPage===0?'disabled':''}>Anterior</button><span>Página ${draft.manualPage+1} de ${pageCount}</span><button class="button small secondary" data-task-manual-page="${Math.min(pageCount-1,draft.manualPage+1)}" ${draft.manualPage===pageCount-1?'disabled':''}>Próxima</button>`:'';
+  const count=mode==='manual'?selected.length:mode==='random'?Math.min(Number(quantity?.value)||1,max):max;
+  $('#packageTaskSummary').textContent=mode==='manual'?`${count} questões selecionadas de ${max} disponíveis.`:mode==='random'?`${count} questões serão sorteadas entre ${max} disponíveis.`:`${count} questões serão incluídas nesta tarefa.`;
+  $('#modalFooter button[data-action="save-import-task"],#modalFooter button[data-action="resolve-import-task"]').forEach(button=>button.disabled=count===0);
+}
+function resolveImportTaskIds() {
+  const draft=state.importTaskDraft; if(!draft) return [];
+  const candidates=taskBuilderCandidates(); const mode=$('#packageTaskMode').value;
+  let ids=mode==='manual'?[...draft.selectedIds].filter(id=>draft.ids.includes(id)):candidates.map(q=>q.id);
+  if(mode==='random') ids=randomize(ids).slice(0,Math.min(Number($('#packageTaskQuantity').value)||1,ids.length));
+  if($('#packageTaskShuffle').checked) ids=randomize(ids);
+  return [...new Set(ids)];
+}
+async function saveImportTask(resolveNow=false) {
+  const ids=resolveImportTaskIds(); if(!ids.length) return toast('Selecione ao menos uma questão para a tarefa.');
+  const title=String($('#packageTaskTitle').value||'Tarefa de questões importadas').trim().slice(0,100)||'Tarefa de questões importadas';
+  const source=state.importTaskDraft.source || {type:'package',packageKey:state.importTaskDraft.packageKey};
+  state.importTaskDraft=null; closeModal();
+  if(resolveNow) return createActivityFromIds(ids,title);
+  await createPendingTaskFromIds(ids,title,source);
+}
+function renderPendingTasks() {
+  const pending=state.data.activities.filter(item=>item.status==='pending').sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt));
+  const section=$('#pendingTaskSection'); if(!section) return;
+  section.classList.toggle('hidden',pending.length===0 || state.currentActivity?.status==='running');
+  $('#pendingTaskCount').textContent=String(pending.length);
+  $('#pendingTaskEmpty').classList.toggle('hidden',pending.length>0);
+  $('#pendingTaskList').innerHTML=pending.map(task=>`<article class="pending-task-item"><div><b>${escapeHTML(task.title)}</b><small>${task.questionIds.length} questões · Criada em ${formatDate(task.createdAt,true)}</small><small>${escapeHTML(task.source?.type==='package'?'Origem: pacote importado':task.source?.type==='packages'?'Origem: seleção de pacotes':'Origem: recomendações de estudo')}</small></div><div class="inline-actions"><button class="button small primary" data-action="start-pending-task" data-id="${safeAttr(task.id)}">Resolver</button><button class="button small secondary" data-action="delete-pending-task" data-id="${safeAttr(task.id)}">Excluir</button></div></article>`).join('');
+}
+async function createPendingTaskFromIds(ids,title,source={type:'manual'}) {
+  const validIds=[...new Set(ids.filter(id=>questionById(id)))]; if(!validIds.length) return toast('Nenhuma questão disponível para criar a tarefa.');
+  const task={id:makeId('activity'),title,questionIds:validIds,status:'pending',createdAt:nowISO(),source,config:{correctionMode:'end',showErrors:false,commentMode:'available',navigationMode:'free',timerEnabled:false,timerMinutes:90,negativeScoring:false,strategy:'saved-task'}};
+  await putRecord(state.db,'activities',task); await refreshData(); pageNavigate('activity'); toast(`Tarefa adicionada com ${validIds.length} questões.`);
+}
+async function startPendingTask(id) {
+  const pending=state.data.activities.find(item=>item.id===id&&item.status==='pending'); if(!pending) return;
+  const running=state.data.activities.find(item=>item.status==='running');
+  if(running){state.currentActivity=running;await loadActivityAnswers(running.id);pageNavigate('activity');return toast('Conclua ou retome a atividade em andamento antes de iniciar outra.');}
+  const started={...pending,status:'running',startedAt:nowISO(),updatedAt:nowISO()};
+  await putRecord(state.db,'activities',started); state.currentActivity=started; state.activityStart=Date.now();
+  await refreshData(); await loadActivityAnswers(started.id); pageNavigate('activity'); renderSession(); startActivityTimer();
+}
+async function deletePendingTask(id) {
+  const task=state.data.activities.find(item=>item.id===id&&item.status==='pending'); if(!task) return;
+  if(!confirm(`Excluir a tarefa "${task.title}"? As questões do banco serão preservadas.`)) return;
+  await deleteRecord(state.db,'activities',id); await refreshData(); toast('Tarefa removida; as questões continuam no banco.');
+}
+async function createPendingTopicTask(subject,topic) {
+  const ids=state.data.questions.filter(question=>(question.subject||question.area||'Conteúdo')===subject&&topicValues(question).some(value=>normalizeSearch(value)===normalizeSearch(topic))).map(question=>question.id);
+  if(!ids.length) return toast('Não há questões disponíveis para esse assunto.');
+  await createPendingTaskFromIds(ids,`Reforço · ${topic}`,{type:'recommendation',subject,topic});
 }
 function importRecordQuestionIds(item) {
   const direct = Array.isArray(item?.questionIds) ? item.questionIds : [];
-  const sourceExam = state.data.collections.find(collection => collection.type === 'sourceExam' && collection.packageId === item?.packageId);
+  const sourceExam = item?.packageId ? state.data.collections.find(collection => collection.type === 'sourceExam' && collection.packageId === item.packageId) : null;
   const fallback = sourceExam?.originalOrder?.length ? sourceExam.originalOrder : (sourceExam?.questionIds || []);
   return [...new Set((direct.length ? direct : fallback).filter(id => Boolean(questionById(id))))];
 }
@@ -1776,6 +2095,10 @@ document.addEventListener('click', async event => {
   if (!event.target.closest('#textSelectionToolbar') && !event.target.closest('.exam-stem, .base-content')) hideTextSelectionToolbar();
   const pageButton = event.target.closest('[data-page]');
   if (pageButton) { event.preventDefault(); pageNavigate(pageButton.dataset.page); return; }
+  const bankTabButton = event.target.closest('[data-bank-tab]');
+  if (bankTabButton) { setBankTab(bankTabButton.dataset.bankTab); if(state.bankTab==='packages') renderPackageHistory(); return; }
+  const manualPageButton = event.target.closest('[data-task-manual-page]');
+  if (manualPageButton && state.importTaskDraft) { state.importTaskDraft.manualPage=Number(manualPageButton.dataset.taskManualPage)||0; renderImportTaskBuilder(); return; }
   const areaButton = event.target.closest('[data-filter-area]');
   if (areaButton) { pageNavigate('bank'); $('#filterArea').value = areaButton.dataset.filterArea; renderBank(); return; }
   const openQuestion = event.target.closest('[data-open-question]');
@@ -1812,15 +2135,39 @@ document.addEventListener('click', async event => {
     else if (action === 'back-import-preview') { closeModal(); openImportModalShellForDraft(); renderImportPreview(); }
     else if (action === 'save-import-question') saveImportQuestion(actionButton.dataset.id);
     else if (action === 'commit-import') await commitImport();
-    else if (action === 'create-activity-from-import') {
+    else if (action === 'create-activity-from-import' || action === 'create-task-from-record') {
       const importedPackage = state.data.imports.find(item => item.id === actionButton.dataset.id);
-      const ids = importedPackage ? importRecordQuestionIds(importedPackage) : [];
-      if (!ids.length) toast('Nenhuma questão desse pacote está disponível no banco. Reimporte o pacote para continuar.');
-      else {
-        const title = `Pacote · ${importedPackage.packageName || importedPackage.fileName || 'Questões importadas'}`;
-        await createActivityFromIds(ids, title);
+      if(importedPackage) openImportTaskBuilder(importedPackage.packageId || importedPackage.id);
+    }
+    else if (action === 'create-task-from-package') openImportTaskBuilder(actionButton.dataset.packageKey);
+    else if (action === 'create-combined-package-task') openCombinedPackageTaskBuilder();
+    else if (action === 'print-performance') window.print();
+    else if (action === 'clear-performance-filters') { state.performancePeriod='all'; state.performanceArea=''; state.performanceSubject=''; state.performanceTopic=''; renderPerformance(); }
+    else if (action === 'package-details') openPackageDetails(actionButton.dataset.packageKey);
+    else if (action === 'remove-package-history') {
+      const group=findImportGroup(actionButton.dataset.packageKey);
+      if(group && confirm(`Remover ${group.records.length} registro(s) de histórico de "${group.name}"?
+
+As questões, imagens, tarefas, respostas e atividades serão preservadas.`)) {
+        state.selectedPackageKeys.delete(group.key);
+        await deleteRecords(state.db,'imports',group.records.map(record=>record.id)); await refreshData(); toast('Histórico do pacote removido. Conteúdo preservado.');
       }
     }
+    else if (action === 'remove-import-history') await removeImportHistoryRecord(actionButton.dataset.id);
+    else if (action === 'delete-package') await deleteImportPackage(actionButton.dataset.packageKey);
+    else if (action === 'save-import-task') await saveImportTask(false);
+    else if (action === 'resolve-import-task') await saveImportTask(true);
+    else if (action === 'task-select-visible') {
+      const candidates=taskBuilderCandidates(); const page=state.importTaskDraft?.manualPage||0; const visible=candidates.slice(page*50,(page+1)*50);
+      visible.forEach(q=>state.importTaskDraft.selectedIds.add(q.id)); renderImportTaskBuilder();
+    }
+    else if (action === 'task-clear-selection') { state.importTaskDraft?.selectedIds.clear(); renderImportTaskBuilder(); }
+    else if (action === 'start-pending-task') await startPendingTask(actionButton.dataset.id);
+    else if (action === 'view-activity-result') { const activity=state.data.activities.find(item=>item.id===actionButton.dataset.id&&item.status==='completed'); if(activity){state.currentActivity=activity;pageNavigate('activity');await renderResult(activity);} }
+    else if (action === 'delete-pending-task') await deletePendingTask(actionButton.dataset.id);
+    else if (action === 'create-pending-topic-task') await createPendingTopicTask(actionButton.dataset.subject,actionButton.dataset.topic);
+    else if (action === 'clear-package-filters') { $('#packageSearch').value=''; $('#packageStatusFilter').value=''; $('#packageSort').value='recent'; renderPackageHistory(); }
+    else if (action === 'open-package-history') { pageNavigate('bank'); setBankTab('packages'); renderPackageHistory(); }
     else if (action === 'favorite') { closeModal(); await toggleFavorite(actionButton.dataset.id); }
     else if (action === 'question-review') { closeModal(); await addReview(actionButton.dataset.id); }
     else if (action === 'edit-question') openEditQuestion(actionButton.dataset.id);
@@ -1854,6 +2201,26 @@ document.addEventListener('click', async event => {
 
 document.addEventListener('change', async event => {
   const target = event.target;
+  if(target.matches('[data-package-select]')) {
+    if(target.checked) state.selectedPackageKeys.add(target.dataset.packageSelect); else state.selectedPackageKeys.delete(target.dataset.packageSelect);
+    renderPackageHistory(); return;
+  }
+  if (target.matches('[data-package-task-question]')) {
+    if(target.checked) state.importTaskDraft?.selectedIds.add(target.dataset.packageTaskQuestion);
+    else state.importTaskDraft?.selectedIds.delete(target.dataset.packageTaskQuestion);
+    renderImportTaskBuilder(); return;
+  }
+  if (target.matches('[data-error-reason]')) {
+    const record=state.data.answers.find(answer=>answer.id===target.dataset.answerId);
+    if(record){const updated={...record,errorReason:target.value||null,updatedAt:nowISO()};await putRecord(state.db,'answers',updated);const index=state.data.answers.findIndex(item=>item.id===updated.id);if(index>=0)state.data.answers[index]=updated;if(state.page==='performance')renderPerformance();}
+    return;
+  }
+  if (target.id==='packageTaskMode' || target.id==='packageTaskArea' || target.id==='packageTaskSubject' || target.id==='packageTaskTopic' || target.id==='packageTaskDifficulty' || target.id==='packageTaskQuantity') { if(state.importTaskDraft) { state.importTaskDraft.manualPage=0; renderImportTaskBuilder(); } return; }
+  if (target.id==='packageStatusFilter' || target.id==='packageSort') { renderPackageHistory(); return; }
+  if (target.id==='performancePeriod') { state.performancePeriod=target.value; renderPerformance(); return; }
+  if (target.id==='performanceAreaFilter') { state.performanceArea=target.value; renderPerformance(); return; }
+  if (target.id==='performanceSubjectFilter') { state.performanceSubject=target.value; renderPerformance(); return; }
+  if (target.id==='performanceTopicFilter') { state.performanceTopic=target.value; renderPerformance(); return; }
   if (target.matches('[data-toggle-activity-topic]')) { toggleActivityTopic(target.dataset.toggleActivityTopic, target.checked); return; }
   if (target.id === 'importJsonFile' || target.id === 'importZipFile') return;
   if (target.matches('[data-restore-conflict]')) { state.restoreChoices[target.dataset.restoreConflict] = target.value; return; }
@@ -1884,6 +2251,9 @@ document.addEventListener('change', async event => {
 });
 
 document.addEventListener('input', event => {
+  if(event.target.id==='packageSearch') { clearTimeout(bankSearchTimer); bankSearchTimer=setTimeout(()=>{if(state.page==='bank')renderPackageHistory();},110); }
+  if(event.target.id==='packageTaskTitle' && state.importTaskDraft) return;
+  if(event.target.id==='packageTaskQuantity' && state.importTaskDraft) renderImportTaskBuilder();
   if (event.target.id === 'bankSearch') { state.bankPage=1; clearTimeout(bankSearchTimer); bankSearchTimer = setTimeout(() => { if (state.page === 'bank') renderBank(); }, 110); }
   if (event.target.id === 'activityTopicSearch') { state.activityTopicSearch = event.target.value; renderActivityTopicList(); }
 });
