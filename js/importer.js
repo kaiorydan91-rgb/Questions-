@@ -107,6 +107,20 @@ function questionCoreSignature(question) {
   return `${question.type}::${normalizeSearch(question.statement)}::${opts}::${statements}`;
 }
 
+function countQuestionInformation(question) {
+  const scalarFields = ['area', 'subject', 'primaryTopic', 'difficulty', 'statement', 'answer', 'explanation', 'textBaseId', 'sourceUrl', 'classificationNote'];
+  let count = scalarFields.filter(field => {
+    const value = question[field];
+    return value !== null && value !== undefined && String(value).trim() !== '';
+  }).length;
+  for (const field of ['secondaryTopics', 'relatedSubjects', 'subtopics', 'prerequisites', 'skills', 'errorCategories', 'statements', 'images', 'tables', 'equations', 'links']) {
+    count += Array.isArray(question[field]) ? question[field].length : 0;
+  }
+  count += Object.keys(question.alternatives || {}).length;
+  count += Object.keys(question.alternativeExplanations || {}).length;
+  return count;
+}
+
 async function sameBlobContent(left, right) {
   if (!left || !right || left.size !== right.size) return false;
   if (globalThis.crypto?.subtle?.digest) {
@@ -299,7 +313,21 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
   const aliasMap = new Map(currentAliases.map(item => [item.alias, item.questionId]));
   const currentById = new Map(currentQuestions.map(item => [item.id, item]));
   const signatureMap = new Map();
-  for (const existing of currentQuestions) if (existing.statement) signatureMap.set(questionSignature(existing), existing);
+  const coreSignatureMap = new Map();
+  const addCandidate = (map, signature, question) => {
+    const matches = map.get(signature) || [];
+    matches.push(question);
+    map.set(signature, matches);
+  };
+  const uniqueCandidate = (map, signature) => {
+    const matches = map.get(signature) || [];
+    return matches.length === 1 ? matches[0] : null;
+  };
+  for (const existing of currentQuestions) {
+    if (!existing.statement) continue;
+    addCandidate(signatureMap, questionSignature(existing), existing);
+    addCandidate(coreSignatureMap, questionCoreSignature(existing), existing);
+  }
   const duplicates = [];
   for (const question of questions) {
     const aliasTarget = aliasMap.get(question.id);
@@ -307,10 +335,21 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     if (directMatch && questionCoreSignature(directMatch) !== questionCoreSignature(question)) {
       throw new Error(`O ID ${question.id} já existe no banco, mas o enunciado ou as alternativas são diferentes. Para evitar mesclar questões distintas, gere um ID globalmente único para esta questão e tente novamente.`);
     }
-    const match = directMatch || (question.statement ? signatureMap.get(questionSignature(question)) : null);
+    const exactMatch = question.statement ? uniqueCandidate(signatureMap, questionSignature(question)) : null;
+    const contentMatch = question.statement ? uniqueCandidate(coreSignatureMap, questionCoreSignature(question)) : null;
+    const match = directMatch || exactMatch || contentMatch;
     if (match) {
+      const matchType = directMatch ? 'id' : exactMatch ? 'exact' : 'content';
       const conflict = match.answer && question.answer && JSON.stringify(match.answer) !== JSON.stringify(question.answer);
-      duplicates.push({ incomingId: question.id, existingId: match.id, conflict: Boolean(conflict), incoming: question, existing: match, resolution: conflict ? 'unresolved' : 'enrich' });
+      // A content-only match means the question body is identical but its images/text base
+      // may differ. Require an explicit choice instead of silently merging two variants.
+      const resolution = (conflict || matchType === 'content') ? 'unresolved' : 'enrich';
+      duplicates.push({
+        incomingId: question.id, existingId: match.id, conflict: Boolean(conflict), matchType,
+        existingInfoCount: countQuestionInformation(match), incomingInfoCount: countQuestionInformation(question),
+        incomingHasLessInfo: countQuestionInformation(question) < countQuestionInformation(match),
+        incoming: question, existing: match, resolution
+      });
     }
   }
   const sourceExam = pkg.sourceExam ?? pkg.exam ?? pkg.prova ?? null;

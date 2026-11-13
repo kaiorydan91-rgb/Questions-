@@ -1258,11 +1258,19 @@ async function deleteImportPackage(key) {
   const questionMap=new Map(state.data.questions.map(question=>[question.id,question]));
   const removedQuestions=removableIds.map(id=>questionMap.get(id)).filter(Boolean);
   const remainingQuestions=state.data.questions.filter(question=>!removableIds.includes(question.id));
-  const remainingAssetIds=new Set(remainingQuestions.flatMap(question=>(question.images||[]).map(image=>image.assetId).filter(Boolean)));
-  const candidateAssetIds=new Set(removedQuestions.flatMap(question=>(question.images||[]).map(image=>image.assetId).filter(Boolean)));
+  const allQuestionImages = question => [
+    ...(question.images || []),
+    ...((question.versionHistory || []).flatMap(version => version.images || []))
+  ].map(image => image.assetId).filter(Boolean);
+  const allQuestionTextBases = question => [
+    question.textBaseId,
+    ...((question.versionHistory || []).map(version => version.textBaseId))
+  ].filter(Boolean);
+  const remainingAssetIds=new Set(remainingQuestions.flatMap(allQuestionImages));
+  const candidateAssetIds=new Set(removedQuestions.flatMap(allQuestionImages));
   const removableAssetIds=[...candidateAssetIds].filter(id=>!remainingAssetIds.has(id));
-  const remainingTextBaseIds=new Set(remainingQuestions.map(question=>question.textBaseId).filter(Boolean));
-  const candidateTextBaseIds=new Set(removedQuestions.map(question=>question.textBaseId).filter(Boolean));
+  const remainingTextBaseIds=new Set(remainingQuestions.flatMap(allQuestionTextBases));
+  const candidateTextBaseIds=new Set(removedQuestions.flatMap(allQuestionTextBases));
   const removableTextBaseIds=[...candidateTextBaseIds].filter(id=>!remainingTextBaseIds.has(id));
   const label=`${group.name}\n\nRegistros do histórico: ${group.records.length}\nQuestões exclusivas a excluir: ${removableIds.length}\nQuestões preservadas por compartilhamento, favoritos, aliases ou uso: ${preservedIds.length}\nArquivos de imagem sem outros vínculos: ${removableAssetIds.length}\nTextos-base sem outros vínculos: ${removableTextBaseIds.length}\n\nAs atividades, respostas, revisões, favoritos, aliases e coleções que dependem de questões serão preservadas.`;
   if(!confirm(`Excluir este pacote e seu conteúdo exclusivo?\n\n${label}\n\nEsta ação não pode ser desfeita. Faça um backup antes de continuar.`)) return;
@@ -1391,8 +1399,34 @@ async function openQuestionDetail(id) {
   const alternatives = question.type === 'multiple_choice' ? Object.entries(question.alternatives || {}).map(([key,value]) => `<div class="answer-option"><div class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</div></div>`).join('') : question.type === 'assertion_set' ? question.statements.map((item,index) => `<p><b>${index+1}.</b> ${richText(item.text)}</p>`).join('') : question.type === 'true_false' ? '<div class="answer-options"><div class="answer-option"><span><b>V</b> — Verdadeiro</span></div><div class="answer-option"><span><b>F</b> — Falso</span></div></div>' : '';
   const beforeStemHtml = `${renderQuestionImages(question,['after_text_base'])}${renderQuestionTables(question,['after_text_base'])}${renderQuestionEquations(question,['after_text_base'])}${renderQuestionImages(question,['before_statement','before-statement'])}`;
   const afterStemHtml = `${renderQuestionImages(question,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(question,['statement','after_statement'])}${renderQuestionEquations(question,['statement','after_statement'])}`;
-  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBase.content)}</div>` : ''}${beforeStemHtml}<div class="exam-stem">${richText(question.statement)}</div>${afterStemHtml}${renderQuestionReferences(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}<div class="answer-feedback correct"><b>Gabarito: ${escapeHTML(answerLabel)}</b>${question.explanation ? `<p>${richText(question.explanation)}</p>` : ''}</div>${question.alternativeExplanations && Object.keys(question.alternativeExplanations).length ? `<h3>Comentários das alternativas</h3>${Object.entries(question.alternativeExplanations).map(([key,value])=>`<p class="fine-print"><b>${escapeHTML(key)}:</b> ${richText(value)}</p>`).join('')}` : ''}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
+  const versionHistory = Array.isArray(question.versionHistory) ? question.versionHistory : [];
+  const versionHistoryHtml = versionHistory.length ? `<details class="fine-print" style="margin-top:16px"><summary>Versões anteriores salvas (${versionHistory.length})</summary><div class="issue-list" style="margin-top:10px">${versionHistory.map((version,index)=>`<div class="preview-q"><b>Versão ${index+1} · ${escapeHTML(formatDate(version.archivedAt || version.updatedAt || version.createdAt,true))}</b><p>${escapeHTML(String(version.statement || '').slice(0,220))}${String(version.statement || '').length>220?'…':''}</p><small>${escapeHTML(version.archiveReason || 'Versão anterior')} ${version.replacedByPackage ? `· Pacote: ${escapeHTML(version.replacedByPackage)}` : ''}</small><div class="note-actions"><button class="text-button" data-action="restore-question-version" data-id="${safeAttr(id)}" data-version-index="${index}">Restaurar esta versão</button></div></div>`).join('')}</div></details>` : '';
+  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBase.content)}</div>` : ''}${beforeStemHtml}<div class="exam-stem">${richText(question.statement)}</div>${afterStemHtml}${renderQuestionReferences(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}<div class="answer-feedback correct"><b>Gabarito: ${escapeHTML(answerLabel)}</b>${question.explanation ? `<p>${richText(question.explanation)}</p>` : ''}</div>${question.alternativeExplanations && Object.keys(question.alternativeExplanations).length ? `<h3>Comentários das alternativas</h3>${Object.entries(question.alternativeExplanations).map(([key,value])=>`<p class="fine-print"><b>${escapeHTML(key)}:</b> ${richText(value)}</p>`).join('')}` : ''}${versionHistoryHtml}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
   await hydrateAssetImages($('#modalBody'));
+}
+
+async function restoreQuestionVersion(id, versionIndex) {
+  const current = questionById(id);
+  const archived = current?.versionHistory?.[versionIndex];
+  if (!current || !archived) return toast('Esta versão anterior não está mais disponível.');
+  if (!confirm('Restaurar esta versão da questão? A versão atual também será guardada no histórico.')) return;
+  const stamp = nowISO();
+  const { versionHistory: currentHistory = [], ...currentSnapshot } = current;
+  const { archivedAt, archiveReason, replacedByPackage, ...restoredContent } = archived;
+  const historyEntry = { ...currentSnapshot, archivedAt: stamp, archiveReason: 'Versão atual arquivada ao restaurar uma versão anterior' };
+  const updated = {
+    ...restoredContent,
+    id: current.id,
+    createdAt: current.createdAt || restoredContent.createdAt || stamp,
+    updatedAt: stamp,
+    favorite: Boolean(current.favorite || restoredContent.favorite),
+    answerHistory: [...(current.answerHistory || [])],
+    versionHistory: [...currentHistory, historyEntry].slice(-5)
+  };
+  await putRecord(state.db, 'questions', updated);
+  await refreshData();
+  await openQuestionDetail(id);
+  toast('Versão anterior restaurada.');
 }
 async function toggleFavorite(id) {
   const question = questionById(id); if (!question) return;
@@ -1485,12 +1519,24 @@ function validateDraftQuestion(q, draft) {
 function renderImportPreview() {
   const draft = state.importDraft; if (!draft) return;
   const issues = draft.questions.map(q => ({ q, issues: validateDraftQuestion(q, draft) })).filter(item => item.issues.length);
-  const conflicts = draft.duplicates.filter(item => item.conflict);
   const cleanCount = draft.questions.length - issues.length;
   const duplicateCount = draft.duplicates.length;
-  const html = `<div class="import-summary"><div><strong>${draft.questions.length}</strong><span>questões lidas</span></div><div><strong>${cleanCount}</strong><span>sem pendências</span></div><div><strong>${draft.assets.length}</strong><span>imagens localizadas</span></div></div><p class="fine-print">Pacote: ${escapeHTML(draft.packageName)} · ${escapeHTML(draft.schemaVersion)} · ${draft.filesFound} arquivos no ZIP. ${duplicateCount} duplicatas identificadas.</p>${issues.length ? `<h3>Questões incompletas (${issues.length})</h3><div class="issue-list">${issues.map(({q,issues: qIssues}) => `<div class="preview-q"><b>${escapeHTML(q.id)} · ${escapeHTML(q.subject || 'Matéria pendente')}</b><p>${escapeHTML(qIssues.join(' · '))}</p><div class="note-actions"><button class="text-button" data-action="edit-import-question" data-id="${safeAttr(q.id)}">Completar</button><button class="text-button" data-action="remove-import-question" data-id="${safeAttr(q.id)}">Excluir do pacote</button></div></div>`).join('')}</div>` : '<div class="issue-item">Todas as questões passaram na verificação básica.</div>'}${duplicateCount ? `<h3>Duplicatas encontradas (${duplicateCount})</h3><div class="issue-list">${draft.duplicates.map(item=>`<div class="preview-q"><b>${escapeHTML(item.incomingId)} → ${escapeHTML(item.existingId)}</b><p>${item.conflict ? 'Os gabaritos divergem. Escolha como resolver.' : 'Os registros podem ser enriquecidos sem criar uma questão separada.'}</p>${item.conflict ? `<label class="field-label">Resolução<select data-duplicate-choice="${safeAttr(item.incomingId)}"><option value="unresolved" ${item.resolution==='unresolved'?'selected':''}>Escolher…</option><option value="keep" ${item.resolution==='keep'?'selected':''}>Manter gabarito existente</option><option value="replace" ${item.resolution==='replace'?'selected':''}>Usar gabarito importado e guardar histórico</option></select></label>` : '<span class="tag peach">Enriquecimento automático</span>'}</div>`).join('')}</div>` : ''}<div class="field-label" style="margin-top:13px">${draft.sourceExam ? `Prova de origem identificada: ${escapeHTML(draft.sourceExam.title || draft.sourceExam.name || 'Simulado / prova')}` : 'Sem prova de origem declarada.'}</div>`;
+  const unresolvedDuplicates = draft.duplicates.some(item => item.resolution === 'unresolved');
+  const duplicateRows = draft.duplicates.map(item => {
+    const identityNote = item.matchType === 'content'
+      ? 'O enunciado e as alternativas coincidem, mas imagens ou texto-base podem ser diferentes. Confira antes de decidir.'
+      : item.conflict ? 'Os gabaritos divergem. Escolha qual versão deve permanecer.'
+      : 'Esta questão já existe no banco e pode ser enriquecida ou substituída.';
+    const informationNote = item.incomingHasLessInfo
+      ? `<p class="fine-print">A versão importada tem menos informações (${item.incomingInfoCount}) que a atual (${item.existingInfoCount}). A substituição continua disponível.</p>`
+      : `<p class="fine-print">Informações identificadas: atual ${item.existingInfoCount} · importada ${item.incomingInfoCount}.</p>`;
+    return `<div class="preview-q"><b>${escapeHTML(item.incomingId)} → ${escapeHTML(item.existingId)}</b><p>${identityNote}</p>${informationNote}<label class="field-label">Como tratar esta questão?<select data-duplicate-choice="${safeAttr(item.incomingId)}">${item.resolution === 'unresolved' ? `<option value="unresolved" selected>Escolha uma ação…</option>` : ''}<option value="enrich" ${item.resolution==='enrich'?'selected':''}>Enriquecer e preservar os dados atuais</option><option value="replace" ${item.resolution==='replace'?'selected':''}>Substituir pela importada, mesmo com menos informações</option><option value="keep" ${item.resolution==='keep'?'selected':''}>Manter a versão atual sem alterações</option></select></label></div>`;
+  }).join('');
+  const lessInfoDuplicates = draft.duplicates.filter(item => item.incomingHasLessInfo).length;
+  const batchReplacementAction = lessInfoDuplicates ? `<div class="note-actions"><button class="text-button" data-action="replace-less-complete-duplicates">Substituir em lote as ${lessInfoDuplicates} versões importadas com menos informações</button></div>` : '';
+  const html = `<div class="import-summary"><div><strong>${draft.questions.length}</strong><span>questões lidas</span></div><div><strong>${cleanCount}</strong><span>sem pendências</span></div><div><strong>${draft.assets.length}</strong><span>imagens localizadas</span></div></div><p class="fine-print">Pacote: ${escapeHTML(draft.packageName)} · ${escapeHTML(draft.schemaVersion)} · ${draft.filesFound} arquivos no ZIP. ${duplicateCount} duplicatas identificadas.</p>${issues.length ? `<h3>Questões incompletas (${issues.length})</h3><div class="issue-list">${issues.map(({q,issues: qIssues}) => `<div class="preview-q"><b>${escapeHTML(q.id)} · ${escapeHTML(q.subject || 'Matéria pendente')}</b><p>${escapeHTML(qIssues.join(' · '))}</p><div class="note-actions"><button class="text-button" data-action="edit-import-question" data-id="${safeAttr(q.id)}">Completar</button><button class="text-button" data-action="remove-import-question" data-id="${safeAttr(q.id)}">Excluir do pacote</button></div></div>`).join('')}</div>` : '<div class="issue-item">Todas as questões passaram na verificação básica.</div>'}${duplicateCount ? `<h3>Questões já existentes (${duplicateCount})</h3>${batchReplacementAction}<div class="issue-list">${duplicateRows}</div>` : ''}<div class="field-label" style="margin-top:13px">${draft.sourceExam ? `Prova de origem identificada: ${escapeHTML(draft.sourceExam.title || draft.sourceExam.name || 'Simulado / prova')}` : 'Sem prova de origem declarada.'}</div>`;
   $('#importPreview').innerHTML = html;
-  $('#modalFooter').innerHTML = `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" data-action="commit-import" ${issues.length || conflicts.some(item=>item.resolution==='unresolved') ? 'disabled' : ''}>${draft.mode === 'solve' ? 'Importar e resolver' : 'Adicionar ao banco'} (${cleanCount})</button>`;
+  $('#modalFooter').innerHTML = `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" data-action="commit-import" ${issues.length || unresolvedDuplicates ? 'disabled' : ''}>${draft.mode === 'solve' ? 'Importar e resolver' : 'Adicionar ao banco'} (${cleanCount})</button>`;
 }
 function editImportQuestion(id) {
   const draft = state.importDraft; const q = draft?.questions.find(item => item.id === id); if (!q) return;
@@ -1524,41 +1570,75 @@ function openImportModalShellForDraft() {
   const draft = state.importDraft;
   openModal('Importar pacote de questões', `<div class="modal-form"><div class="import-drop"><b>${escapeHTML(draft.fileName)}</b></div><div class="import-drop"><b>${escapeHTML(draft.imageFileName || 'Nenhum ZIP selecionado')}</b></div><label>Após importar<select id="importMode"><option value="bank" ${draft.mode==='bank'?'selected':''}>Adicionar ao banco</option><option value="solve" ${draft.mode==='solve'?'selected':''}>Importar e resolver agora</option></select></label><div id="importPreview"></div></div>`, '', 'IMPORTAÇÃO E VALIDAÇÃO');
 }
+function buildReplacementQuestion(existing, incoming, packageName) {
+  const stamp = nowISO();
+  const { versionHistory = [], ...previousSnapshot } = existing;
+  const archivedVersion = {
+    ...previousSnapshot,
+    archivedAt: stamp,
+    archiveReason: 'Substituída pela versão importada',
+    replacedByPackage: packageName || ''
+  };
+  const answerHistory = [...(existing.answerHistory || [])];
+  if (existing.answer && incoming.answer && JSON.stringify(existing.answer) !== JSON.stringify(incoming.answer)) {
+    answerHistory.push({ answer: existing.answer, source: existing.source || {}, changedAt: stamp, reason: 'Gabarito anterior à substituição' });
+  }
+  return {
+    ...incoming,
+    id: existing.id,
+    createdAt: existing.createdAt || incoming.createdAt || stamp,
+    updatedAt: stamp,
+    favorite: Boolean(existing.favorite || incoming.favorite),
+    answerHistory,
+    versionHistory: [...versionHistory, archivedVersion].slice(-5)
+  };
+}
+
 async function commitImport() {
   const draft = state.importDraft; if (!draft) return;
   draft.mode = $('#importMode')?.value || draft.mode;
   const issues = draft.questions.map(q=>validateDraftQuestion(q,draft)).filter(items=>items.length);
   if (issues.length) return toast('Ainda existem questões incompletas. Complete ou exclua os itens sinalizados.');
-  if (draft.duplicates.some(item=>item.conflict && item.resolution==='unresolved')) return toast('Resolva os conflitos de gabarito antes de importar.');
-  const incomingById = new Map(draft.questions.map(q=>[q.id,q]));
+  if (draft.duplicates.some(item=>item.resolution==='unresolved')) return toast('Escolha como tratar todas as questões que já existem no banco.');
   const currentById = new Map(state.data.questions.map(q=>[q.id,q]));
   const aliases = [];
   const questionsToWrite = [];
   const newQuestionIds = [];
   const incomingToFinalId = new Map();
+  let addedCount = 0;
+  let enrichedCount = 0;
+  let replacedCount = 0;
+  let keptCount = 0;
   for (const incoming of draft.questions) {
     const duplicate = draft.duplicates.find(item=>item.incomingId===incoming.id);
-    if (!duplicate) { questionsToWrite.push(incoming); newQuestionIds.push(incoming.id); incomingToFinalId.set(incoming.id, incoming.id); continue; }
-    const existing = currentById.get(duplicate.existingId);
-    if (!existing) { questionsToWrite.push(incoming); newQuestionIds.push(incoming.id); incomingToFinalId.set(incoming.id, incoming.id); continue; }
-    if (duplicate.conflict && duplicate.resolution === 'keep') {
-      aliases.push({ alias: incoming.id, questionId: existing.id, updatedAt: nowISO() });
-      newQuestionIds.push(existing.id);
-      incomingToFinalId.set(incoming.id, existing.id);
+    if (!duplicate) {
+      questionsToWrite.push(incoming); newQuestionIds.push(incoming.id); incomingToFinalId.set(incoming.id, incoming.id); addedCount++;
       continue;
     }
-    const enriched = mergeQuestion(existing, incoming);
-    if (duplicate.conflict && duplicate.resolution === 'replace') {
-      enriched.answerHistory = [...(existing.answerHistory || []), { answer: existing.answer, source: existing.source || {}, changedAt: nowISO() }];
-      enriched.answer = incoming.answer;
+    const existing = currentById.get(duplicate.existingId);
+    if (!existing) {
+      questionsToWrite.push(incoming); newQuestionIds.push(incoming.id); incomingToFinalId.set(incoming.id, incoming.id); addedCount++;
+      continue;
     }
-    questionsToWrite.push(enriched);
+    if (duplicate.resolution === 'keep') {
+      if (incoming.id !== existing.id) aliases.push({ alias: incoming.id, questionId: existing.id, updatedAt: nowISO() });
+      newQuestionIds.push(existing.id);
+      incomingToFinalId.set(incoming.id, existing.id);
+      keptCount++;
+      continue;
+    }
+    const updatedQuestion = duplicate.resolution === 'replace'
+      ? buildReplacementQuestion(existing, incoming, draft.packageName)
+      : mergeQuestion(existing, incoming);
+    if (duplicate.resolution === 'replace') replacedCount++;
+    else enrichedCount++;
+    questionsToWrite.push(updatedQuestion);
     if (incoming.id !== existing.id) aliases.push({ alias: incoming.id, questionId: existing.id, updatedAt: nowISO() });
     newQuestionIds.push(existing.id);
     incomingToFinalId.set(incoming.id, existing.id);
   }
   const packageQuestionIds = [...new Set(newQuestionIds)];
-  const importRecord = { id: makeId('import'), packageId: draft.packageId, packageName: draft.packageName, fileName: draft.fileName, imageFileName: draft.imageFileName, operation: draft.mode === 'solve' ? 'Importar e resolver' : 'Importação de questões', importedCount: questionsToWrite.length, packageQuestionCount: packageQuestionIds.length, questionIds: packageQuestionIds, status: 'Concluída', createdAt: nowISO(), updatedAt: nowISO() };
+  const importRecord = { id: makeId('import'), packageId: draft.packageId, packageName: draft.packageName, fileName: draft.fileName, imageFileName: draft.imageFileName, operation: draft.mode === 'solve' ? 'Importar e resolver' : (replacedCount ? 'Importação com substituições' : 'Importação de questões'), importedCount: questionsToWrite.length, addedCount, enrichedCount, replacedCount, keptCount, packageQuestionCount: packageQuestionIds.length, questionIds: packageQuestionIds, status: 'Concluída', createdAt: nowISO(), updatedAt: nowISO() };
   const usedAssetIds = new Set(draft.questions.flatMap(q => (q.images || []).map(image => image.assetId)));
   const usedAssets = draft.assets.filter(asset => usedAssetIds.has(asset.id));
   const usedAssetIdsForBlobs = new Set(usedAssets.map(asset => asset.id));
@@ -1595,7 +1675,7 @@ async function commitImport() {
     importStarted.updatedAt = nowISO();
     await writeBatch(state.db, { imports: [importStarted] });
     const mode = draft.mode; state.importDraft = null; closeModal(); if ((draft.assetBlobs || []).length) clearAssetUrlCache(); await refreshData();
-    toast(`${questionsToWrite.length} questões adicionadas ou enriquecidas.`);
+    toast(`Importação concluída: ${addedCount} novas · ${enrichedCount} enriquecidas · ${replacedCount} substituídas · ${keptCount} mantidas.`);
     if (mode === 'solve' && newQuestionIds.length) await createActivityFromIds([...new Set(newQuestionIds)], `Atividade de importação · ${draft.packageName}`);
     else pageNavigate('bank');
   } catch (error) {
@@ -2132,6 +2212,12 @@ document.addEventListener('click', async event => {
       state.importDraft.duplicates = state.importDraft.duplicates.filter(item=>item.incomingId!==actionButton.dataset.id);
       renderImportPreview();
     }
+    else if (action === 'replace-less-complete-duplicates') {
+      const targets = state.importDraft?.duplicates.filter(item=>item.incomingHasLessInfo) || [];
+      targets.forEach(item => { item.resolution = 'replace'; });
+      renderImportPreview();
+      toast(`${targets.length} duplicatas marcadas para substituição. Revise a lista antes de importar.`);
+    }
     else if (action === 'back-import-preview') { closeModal(); openImportModalShellForDraft(); renderImportPreview(); }
     else if (action === 'save-import-question') saveImportQuestion(actionButton.dataset.id);
     else if (action === 'commit-import') await commitImport();
@@ -2171,6 +2257,7 @@ As questões, imagens, tarefas, respostas e atividades serão preservadas.`)) {
     else if (action === 'favorite') { closeModal(); await toggleFavorite(actionButton.dataset.id); }
     else if (action === 'question-review') { closeModal(); await addReview(actionButton.dataset.id); }
     else if (action === 'edit-question') openEditQuestion(actionButton.dataset.id);
+    else if (action === 'restore-question-version') await restoreQuestionVersion(actionButton.dataset.id, Number(actionButton.dataset.versionIndex));
     else if (action === 'save-question-edit') await saveQuestionEdit(actionButton.dataset.id);
     else if (action === 'finish-activity') await finishActivity(false);
     else if (action === 'discard-activity') await discardCurrentActivity();
