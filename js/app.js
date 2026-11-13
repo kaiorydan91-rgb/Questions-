@@ -136,7 +136,7 @@ function closeModal() {
   $('#modalFooter').innerHTML = '';
 }
 
-async function refreshData() {
+async function refreshData(render = true) {
   const pairs = await Promise.all(DATA_STORES.map(async name => [name, await getAll(state.db, name)]));
   state.data = Object.fromEntries(pairs);
   state.data.questions ||= [];
@@ -157,7 +157,7 @@ async function refreshData() {
   if (obsoleteTopicIds.length) await deleteRecords(state.db, 'topics', obsoleteTopicIds);
   state.data.topics = savedTopics;
   activityTopicCache = { questions: null, topics: null, items: [], counts: new Map() };
-  renderAll();
+  if (render) renderAll();
 }
 function questionById(id) {
   if (questionMapSource !== state.data.questions) {
@@ -1165,10 +1165,10 @@ async function renderSettings() {
   $('#importHistoryEmpty').classList.toggle('hidden', imports.length > 0);
   $('#importHistory').innerHTML = imports.map(item => {
     const ids = importRecordQuestionIds(item);
-    const total = Number(item.packageQuestionCount) || ids.length || Number(item.importedCount) || 0;
+    const total = Number.isFinite(Number(item.packageQuestionCount)) ? Number(item.packageQuestionCount) : (ids.length || Number(item.importedCount) || 0);
     const canCreate = ids.length > 0 && ['Concluída', 'Parcial'].includes(item.status || 'Concluída');
     const unavailable = '';
-    return `<div class="history-row import-history-row"><div class="import-history-main"><b>${escapeHTML(item.packageName || item.fileName || 'Operação')}</b><small>${formatDate(item.createdAt, true)} · ${escapeHTML(item.operation || 'Importação')} · ${total} questões no pacote</small>${unavailable}</div><div class="import-history-actions"><span class="tag peach">${escapeHTML(item.status || 'Concluída')}</span>${canCreate ? `<button class="button primary" type="button" data-action="create-task-from-record" data-id="${safeAttr(item.id)}">Criar tarefa ↗</button>` : ''}<button class="button small secondary" type="button" data-action="remove-import-history" data-id="${safeAttr(item.id)}">Remover histórico</button></div></div>`;
+    return `<div class="history-row import-history-row"><div class="import-history-main"><b>${escapeHTML(item.packageName || item.fileName || 'Operação')}</b><small>${formatDate(item.createdAt, true)} · ${escapeHTML(item.operation || 'Importação')} · ${total} questões no pacote</small>${unavailable}</div><div class="import-history-actions"><span class="tag peach">${escapeHTML(item.status || 'Concluída')}</span>${canCreate ? `<button class="button primary" type="button" data-action="create-task-from-record" data-id="${safeAttr(item.id)}">Criar tarefa ↗</button>` : ''}<button class="button small danger" type="button" data-action="delete-import-package-from-record" data-id="${safeAttr(item.id)}">Excluir pacote e questões</button></div></div>`;
   }).join('');
 }
 function getImportGroups() {
@@ -1218,7 +1218,7 @@ function renderPackageHistory() {
     const imageQuestions=packageQuestions.filter(question=>(question.images||[]).length>0).length;
     const areaLabels=[...new Set(packageQuestions.map(question=>question.area).filter(Boolean))];
     const subjectLabels=[...new Set(packageQuestions.map(question=>question.subject).filter(Boolean))];
-    return `<article class="package-card"><div class="package-card-heading"><div class="package-card-title-wrap"><label class="package-select"><input type="checkbox" data-package-select="${safeAttr(group.key)}" ${state.selectedPackageKeys.has(group.key)?'checked':''}/><span>Incluir na seleção</span></label><span class="tag peach">${escapeHTML(group.status)}</span><h3>${escapeHTML(group.name)}</h3><p>${formatDate(group.latestAt || group.createdAt,true)} · ${group.ids.length} questões · ${imageQuestions} com imagens · ${group.records.length} ${group.records.length===1?'importação':'operações'}</p>${areaLabels.length?`<small>Áreas: ${escapeHTML(areaLabels.slice(0,3).join(', '))}${areaLabels.length>3?` +${areaLabels.length-3}`:''}</small>`:''}${subjectLabels.length?`<small>Matérias: ${escapeHTML(subjectLabels.slice(0,4).join(', '))}${subjectLabels.length>4?` +${subjectLabels.length-4}`:''}</small>`:''}${files?`<small>Arquivos: ${escapeHTML(files)}</small>`:''}<small>${shared?`${shared} questões compartilhadas com outros pacotes`:'Sem compartilhamento identificado entre pacotes'}</small></div><span class="package-icon">▤</span></div><div class="package-actions"><button class="button small secondary" data-action="package-details" data-package-key="${safeAttr(group.key)}">Ver questões</button><button class="button small primary" data-action="create-task-from-package" data-package-key="${safeAttr(group.key)}" ${group.ids.length?'':'disabled'}>Criar tarefa</button><button class="button small secondary" data-action="remove-package-history" data-package-key="${safeAttr(group.key)}">Remover histórico</button><button class="button small danger" data-action="delete-package" data-package-key="${safeAttr(group.key)}">Excluir pacote</button></div></article>`;
+    return `<article class="package-card"><div class="package-card-heading"><div class="package-card-title-wrap"><label class="package-select"><input type="checkbox" data-package-select="${safeAttr(group.key)}" ${state.selectedPackageKeys.has(group.key)?'checked':''}/><span>Incluir na seleção</span></label><span class="tag peach">${escapeHTML(group.status)}</span><h3>${escapeHTML(group.name)}</h3><p>${formatDate(group.latestAt || group.createdAt,true)} · ${group.ids.length} questões · ${imageQuestions} com imagens · ${group.records.length} ${group.records.length===1?'importação':'operações'}</p>${areaLabels.length?`<small>Áreas: ${escapeHTML(areaLabels.slice(0,3).join(', '))}${areaLabels.length>3?` +${areaLabels.length-3}`:''}</small>`:''}${subjectLabels.length?`<small>Matérias: ${escapeHTML(subjectLabels.slice(0,4).join(', '))}${subjectLabels.length>4?` +${subjectLabels.length-4}`:''}</small>`:''}${files?`<small>Arquivos: ${escapeHTML(files)}</small>`:''}<small>${shared?`${shared} questões compartilhadas com outros pacotes`:'Sem compartilhamento identificado entre pacotes'}</small></div><span class="package-icon">▤</span></div><div class="package-actions"><button class="button small secondary" data-action="package-details" data-package-key="${safeAttr(group.key)}">Ver questões</button><button class="button small primary" data-action="create-task-from-package" data-package-key="${safeAttr(group.key)}" ${group.ids.length?'':'disabled'}>Criar tarefa</button><button class="button small danger" data-action="delete-package" data-package-key="${safeAttr(group.key)}">Excluir pacote e questões</button></div></article>`;
   }).join('');
 }
 function findImportGroup(key) { return getImportGroups().find(group=>group.key===String(key)); }
@@ -1227,64 +1227,193 @@ function openPackageDetails(key) {
   const rows=group.ids.map(id=>questionById(id)).filter(Boolean).map((question,index)=>`<article class="package-question-row"><span class="question-number">${index+1}</span><div><div class="question-meta"><span class="tag peach">${escapeHTML(question.subject||question.area)}</span><span class="tag">${escapeHTML(question.difficulty||'Sem nível')}</span></div><b>${escapeHTML(question.id)}</b><p>${escapeHTML(String(question.statement||'').slice(0,220))}${String(question.statement||'').length>220?'…':''}</p><small>${escapeHTML(question.primaryTopic||'Sem assunto')} · ${question.images?.length||0} imagens</small></div><button class="button small secondary" data-open-question="${safeAttr(question.id)}">Abrir</button></article>`).join('');
   openModal(group.name,`<div class="package-detail-summary"><b>${group.ids.length} questões</b><span>${group.records.length} registros de importação · ${formatDate(group.latestAt||group.createdAt,true)}</span></div><div class="package-question-list">${rows||'<div class="empty-inline">Nenhuma questão deste pacote está disponível.</div>'}</div>`,`<button class="button secondary" data-action="close-modal">Fechar</button><button class="button primary" data-action="create-task-from-package" data-package-key="${safeAttr(group.key)}">Criar tarefa ↗</button>`,'DETALHES DO PACOTE');
 }
-async function removeImportHistoryRecord(id) {
-  const record=state.data.imports.find(item=>item.id===id); if(!record) return;
-  if(!confirm(`Remover somente este registro de importação (${record.packageName||record.fileName||'pacote'})? As questões, imagens, atividades e respostas serão preservadas.`)) return;
-  const groupKey = String(record.packageId || record.id);
-  await deleteRecord(state.db,'imports',id);
-  if (!state.data.imports.some(item => String(item.packageId || item.id) === groupKey && item.id !== id)) state.selectedPackageKeys.delete(groupKey);
-  await refreshData();
-  if(state.page==='bank') renderPackageHistory();
-  if(state.page==='settings') await renderSettings();
-  toast('Registro removido. O conteúdo do banco foi preservado.');
-}
-async function deleteImportPackage(key) {
-  const group=findImportGroup(key); if(!group) return toast('Pacote não encontrado.');
-  const targetRecordIds=new Set(group.records.map(record=>record.id));
-  const targetCollectionIds=new Set(group.packageId ? state.data.collections.filter(collection=>collection.type==='sourceExam' && collection.packageId===group.packageId).map(collection=>collection.id) : []);
-  const outsideImportRefs=new Set();
-  state.data.imports.filter(record=>!targetRecordIds.has(record.id)).forEach(record=>importRecordQuestionIds(record).forEach(id=>outsideImportRefs.add(id)));
-  const outsideCollectionRefs=new Set();
-  state.data.collections.filter(collection=>!targetCollectionIds.has(collection.id)).forEach(collection=>[...(collection.questionIds||[]),...(collection.originalOrder||[])].forEach(id=>outsideCollectionRefs.add(id)));
-  const activityRefs=new Set(); state.data.activities.forEach(activity=>(activity.questionIds||[]).forEach(id=>activityRefs.add(id)));
-  const answerRefs=new Set(state.data.answers.map(answer=>answer.questionId).filter(Boolean));
-  const reviewRefs=new Set(state.data.reviews.map(review=>review.questionId).filter(Boolean));
-  const noteRefs=new Set(state.data.notes.flatMap(note=>[note.questionId,...(note.questionIds||[])]).filter(Boolean));
-  const favoriteRefs=new Set(state.data.questions.filter(question=>question.favorite).map(question=>question.id));
-  const aliasRefs=new Set(state.data.aliases.map(alias=>alias.questionId).filter(Boolean));
-  const protectedRefs=new Set([...outsideImportRefs,...outsideCollectionRefs,...activityRefs,...answerRefs,...reviewRefs,...noteRefs,...favoriteRefs,...aliasRefs]);
-  const removableIds=group.ids.filter(id=>!protectedRefs.has(id));
-  const preservedIds=group.ids.filter(id=>protectedRefs.has(id));
-  const questionMap=new Map(state.data.questions.map(question=>[question.id,question]));
-  const removedQuestions=removableIds.map(id=>questionMap.get(id)).filter(Boolean);
-  const remainingQuestions=state.data.questions.filter(question=>!removableIds.includes(question.id));
-  const allQuestionImages = question => [
+async function deletePackageContents(key, { records: suppliedRecords = null, packageId: suppliedPackageId = null, questionIds: suppliedQuestionIds = [], confirmUser = true, quiet = false } = {}) {
+  const normalizedKey = String(key);
+  const group = findImportGroup(normalizedKey);
+  const targetRecords = group?.records || suppliedRecords || [];
+  const targetRecordIds = new Set(targetRecords.map(record => record.id));
+  const packageId = group?.packageId || suppliedPackageId || targetRecords.find(record => record.packageId)?.packageId || null;
+  const targetCollections = state.data.collections.filter(collection => collection.type === 'sourceExam' && (
+    packageId ? collection.packageId === packageId : targetRecordIds.has(collection.packageId)
+  ));
+  const targetCollectionIds = new Set(targetCollections.map(collection => collection.id));
+  const allQuestionIds = new Set([
+    ...(group?.ids || []),
+    ...suppliedQuestionIds,
+    ...targetRecords.flatMap(record => Array.isArray(record.questionIds) ? record.questionIds : []),
+    ...targetCollections.flatMap(collection => [...(collection.questionIds || []), ...(collection.originalOrder || [])])
+  ].filter(id => id != null).map(String));
+  if (!targetRecords.length && !allQuestionIds.size && !targetCollectionIds.size) {
+    if (!quiet) toast('Pacote não encontrado ou sem conteúdo vinculado.');
+    return false;
+  }
+
+  const questionMap = new Map(state.data.questions.map(question => [String(question.id), question]));
+  const removedQuestions = [...allQuestionIds].map(id => questionMap.get(id)).filter(Boolean);
+  const remainingQuestions = state.data.questions.filter(question => !allQuestionIds.has(String(question.id)));
+  const collectQuestionAssets = question => [
     ...(question.images || []),
     ...((question.versionHistory || []).flatMap(version => version.images || []))
   ].map(image => image.assetId).filter(Boolean);
-  const allQuestionTextBases = question => [
+  const collectQuestionTextBases = question => [
     question.textBaseId,
     ...((question.versionHistory || []).map(version => version.textBaseId))
   ].filter(Boolean);
-  const remainingAssetIds=new Set(remainingQuestions.flatMap(allQuestionImages));
-  const candidateAssetIds=new Set(removedQuestions.flatMap(allQuestionImages));
-  const removableAssetIds=[...candidateAssetIds].filter(id=>!remainingAssetIds.has(id));
-  const remainingTextBaseIds=new Set(remainingQuestions.flatMap(allQuestionTextBases));
-  const candidateTextBaseIds=new Set(removedQuestions.flatMap(allQuestionTextBases));
-  const removableTextBaseIds=[...candidateTextBaseIds].filter(id=>!remainingTextBaseIds.has(id));
-  const label=`${group.name}\n\nRegistros do histórico: ${group.records.length}\nQuestões exclusivas a excluir: ${removableIds.length}\nQuestões preservadas por compartilhamento, favoritos, aliases ou uso: ${preservedIds.length}\nArquivos de imagem sem outros vínculos: ${removableAssetIds.length}\nTextos-base sem outros vínculos: ${removableTextBaseIds.length}\n\nAs atividades, respostas, revisões, favoritos, aliases e coleções que dependem de questões serão preservadas.`;
-  if(!confirm(`Excluir este pacote e seu conteúdo exclusivo?\n\n${label}\n\nEsta ação não pode ser desfeita. Faça um backup antes de continuar.`)) return;
-  state.selectedPackageKeys.delete(group.key);
-  await deleteRecords(state.db,'imports',[...targetRecordIds]);
-  if(targetCollectionIds.size) await deleteRecords(state.db,'collections',[...targetCollectionIds]);
-  if(removableIds.length) await deleteRecords(state.db,'questions',removableIds);
-  if(removableAssetIds.length){ await deleteRecords(state.db,'assets',removableAssetIds); await deleteRecords(state.db,'assetBlobs',removableAssetIds); }
-  if(removableTextBaseIds.length) await deleteRecords(state.db,'textBases',removableTextBaseIds);
-  const aliasIds=state.data.aliases.filter(alias=>removableIds.includes(alias.questionId)).map(alias=>alias.alias);
-  if(aliasIds.length) await deleteRecords(state.db,'aliases',aliasIds);
-  clearAssetUrlCache(); await refreshData();
-  if(state.page==='bank') renderPackageHistory();
-  toast(`Pacote removido. ${removableIds.length} questões exclusivas excluídas e ${preservedIds.length} preservadas.`);
+  const remainingAssetIds = new Set(remainingQuestions.flatMap(collectQuestionAssets));
+  const candidateAssetIds = new Set(removedQuestions.flatMap(collectQuestionAssets));
+  const removableAssetIds = [...candidateAssetIds].filter(id => !remainingAssetIds.has(id));
+  const remainingTextBaseIds = new Set(remainingQuestions.flatMap(collectQuestionTextBases));
+  const candidateTextBaseIds = new Set(removedQuestions.flatMap(collectQuestionTextBases));
+  const removableTextBaseIds = [...candidateTextBaseIds].filter(id => !remainingTextBaseIds.has(id));
+
+  const updatedImports = [];
+  for (const record of state.data.imports) {
+    if (targetRecordIds.has(record.id) || !Array.isArray(record.questionIds)) continue;
+    const filteredIds = record.questionIds.filter(id => !allQuestionIds.has(String(id)));
+    if (filteredIds.length !== record.questionIds.length) {
+      updatedImports.push({ ...record, questionIds: filteredIds, packageQuestionCount: filteredIds.length, updatedAt: nowISO() });
+    }
+  }
+  const updatedCollections = [];
+  for (const collection of state.data.collections) {
+    if (targetCollectionIds.has(collection.id)) continue;
+    const nextQuestionIds = Array.isArray(collection.questionIds) ? collection.questionIds.filter(id => !allQuestionIds.has(String(id))) : collection.questionIds;
+    const nextOriginalOrder = Array.isArray(collection.originalOrder) ? collection.originalOrder.filter(id => !allQuestionIds.has(String(id))) : collection.originalOrder;
+    const changed = (Array.isArray(collection.questionIds) && nextQuestionIds.length !== collection.questionIds.length) || (Array.isArray(collection.originalOrder) && nextOriginalOrder.length !== collection.originalOrder.length);
+    if (changed) updatedCollections.push({ ...collection, ...(Array.isArray(collection.questionIds) ? { questionIds: nextQuestionIds } : {}), ...(Array.isArray(collection.originalOrder) ? { originalOrder: nextOriginalOrder } : {}), updatedAt: nowISO() });
+  }
+
+  const updatedActivities = [];
+  const deletedActivityIds = new Set();
+  for (const activity of state.data.activities) {
+    if (!['pending', 'running'].includes(activity.status) || !Array.isArray(activity.questionIds)) continue;
+    const filteredIds = activity.questionIds.filter(id => !allQuestionIds.has(String(id)));
+    if (filteredIds.length === activity.questionIds.length) continue;
+    if (!filteredIds.length) deletedActivityIds.add(activity.id);
+    else updatedActivities.push({ ...activity, questionIds: filteredIds, updatedAt: nowISO() });
+  }
+  const answerIdsToDelete = state.data.answers.filter(answer =>
+    deletedActivityIds.has(answer.activityId) || (allQuestionIds.has(String(answer.questionId)) && state.data.activities.some(activity => activity.id === answer.activityId && ['pending', 'running'].includes(activity.status)))
+  ).map(answer => answer.id);
+  const reviewIdsToDelete = state.data.reviews.filter(review => allQuestionIds.has(String(review.questionId))).map(review => review.id);
+  const aliasIdsToDelete = state.data.aliases.filter(alias => allQuestionIds.has(String(alias.questionId))).map(alias => alias.alias);
+
+  if (confirmUser) {
+    const name = group?.name || targetRecords[0]?.packageName || targetRecords[0]?.fileName || 'Pacote importado';
+    const summary = `${name}\n\nRegistros de importação: ${targetRecords.length}\nQuestões que serão apagadas: ${allQuestionIds.size}\nQuestões encontradas no banco: ${removedQuestions.length}\nImagens sem outros vínculos: ${removableAssetIds.length}\nTextos-base sem outros vínculos: ${removableTextBaseIds.length}\n\nAs questões serão excluídas mesmo que estejam compartilhadas com outros pacotes, coleções ou favoritos. Atividades concluídas e seus resultados anteriores serão mantidos; tarefas e atividades em andamento serão ajustadas.`;
+    if (!confirm(`Excluir o pacote e todas as suas questões?\n\n${summary}\n\nEsta ação não pode ser desfeita. Faça um backup antes de continuar.`)) return false;
+  }
+
+  state.selectedPackageKeys.delete(normalizedKey);
+  if (updatedImports.length || updatedCollections.length || updatedActivities.length) {
+    await writeBatch(state.db, {
+      ...(updatedImports.length ? { imports: updatedImports } : {}),
+      ...(updatedCollections.length ? { collections: updatedCollections } : {}),
+      ...(updatedActivities.length ? { activities: updatedActivities } : {})
+    });
+  }
+  if (targetRecordIds.size) await deleteRecords(state.db, 'imports', [...targetRecordIds]);
+  if (targetCollectionIds.size) await deleteRecords(state.db, 'collections', [...targetCollectionIds]);
+  if (allQuestionIds.size) await deleteRecords(state.db, 'questions', [...allQuestionIds]);
+  if (removableAssetIds.length) {
+    await deleteRecords(state.db, 'assets', removableAssetIds);
+    await deleteRecords(state.db, 'assetBlobs', removableAssetIds);
+  }
+  if (removableTextBaseIds.length) await deleteRecords(state.db, 'textBases', removableTextBaseIds);
+  if (aliasIdsToDelete.length) await deleteRecords(state.db, 'aliases', aliasIdsToDelete);
+  if (reviewIdsToDelete.length) await deleteRecords(state.db, 'reviews', reviewIdsToDelete);
+  if (answerIdsToDelete.length) await deleteRecords(state.db, 'answers', answerIdsToDelete);
+  if (deletedActivityIds.size) await deleteRecords(state.db, 'activities', [...deletedActivityIds]);
+  if (state.currentActivity && deletedActivityIds.has(state.currentActivity.id)) {
+    state.currentActivity = null;
+    state.activityAnswers.clear();
+    clearInterval(state.activityTimer);
+  } else if (state.currentActivity && updatedActivities.some(activity => activity.id === state.currentActivity.id)) {
+    state.currentActivity = updatedActivities.find(activity => activity.id === state.currentActivity.id);
+    for (const id of allQuestionIds) state.activityAnswers.delete(id);
+  }
+  clearAssetUrlCache();
+  await refreshData(!quiet);
+  if (!quiet && state.page === 'bank') renderPackageHistory();
+  if (!quiet && state.page === 'settings') await renderSettings();
+  if (!quiet) toast(`Pacote excluído. ${removedQuestions.length} questões removidas do banco.`);
+  return true;
+}
+
+async function deleteImportPackage(key) {
+  return deletePackageContents(key);
+}
+
+async function deleteImportPackageFromRecord(id) {
+  const record = state.data.imports.find(item => item.id === id);
+  if (!record) return toast('Registro de importação não encontrado.');
+  return deleteImportPackage(String(record.packageId || record.id));
+}
+
+// Remove orphaned questions left by older versions when a package history was
+// deleted without deleting its questions. The local change journal retains the
+// original import records, so this also handles packages removed previously.
+async function cleanupPreviouslyDeletedPackages() {
+  const { changes } = await getChangesSnapshot(state.db, 0);
+  const importStates = new Map();
+  const collectionRecords = new Map();
+  for (const change of changes) {
+    if (change.table === 'imports') {
+      const current = importStates.get(String(change.id)) || { action: null, record: null };
+      current.action = change.action;
+      if (change.action === 'upsert' && change.record) current.record = change.record;
+      importStates.set(String(change.id), current);
+    } else if (change.table === 'collections') {
+      const current = collectionRecords.get(String(change.id)) || { action: null, record: null };
+      current.action = change.action;
+      if (change.action === 'upsert' && change.record) current.record = change.record;
+      collectionRecords.set(String(change.id), current);
+    }
+  }
+
+  const activePackageKeys = new Set(state.data.imports.map(record => String(record.packageId || record.id)));
+  const deletedPackages = new Map();
+  for (const [recordId, entry] of importStates) {
+    if (entry.action !== 'delete' || !entry.record) continue;
+    const record = entry.record;
+    const key = String(record.packageId || record.id || recordId);
+    if (activePackageKeys.has(key)) continue;
+    const group = deletedPackages.get(key) || { packageId: record.packageId || null, records: [], questionIds: new Set() };
+    group.records.push(record);
+    (Array.isArray(record.questionIds) ? record.questionIds : []).forEach(id => group.questionIds.add(String(id)));
+    deletedPackages.set(key, group);
+  }
+  for (const entry of collectionRecords.values()) {
+    const collection = entry.record;
+    if (!collection || collection.type !== 'sourceExam' || !collection.packageId) continue;
+    const group = deletedPackages.get(String(collection.packageId));
+    if (!group) continue;
+    [...(collection.questionIds || []), ...(collection.originalOrder || [])].forEach(id => group.questionIds.add(String(id)));
+  }
+
+  let removed = 0;
+  for (const [key, group] of deletedPackages) {
+    const ids = group.questionIds;
+    const hasQuestion = [...ids].some(id => Boolean(questionById(id)));
+    const hasImportReference = state.data.imports.some(record => Array.isArray(record.questionIds) && record.questionIds.some(id => ids.has(String(id))));
+    const hasCollectionReference = state.data.collections.some(collection =>
+      (collection.type === 'sourceExam' && String(collection.packageId || '') === key) ||
+      [...(collection.questionIds || []), ...(collection.originalOrder || [])].some(id => ids.has(String(id)))
+    );
+    const hasActiveTaskReference = state.data.activities.some(activity => ['pending', 'running'].includes(activity.status) && (activity.questionIds || []).some(id => ids.has(String(id))));
+    const hasReviewReference = state.data.reviews.some(review => ids.has(String(review.questionId)));
+    const hasAliasReference = state.data.aliases.some(alias => ids.has(String(alias.questionId)));
+    if (!hasQuestion && !hasImportReference && !hasCollectionReference && !hasActiveTaskReference && !hasReviewReference && !hasAliasReference) continue;
+    const didRemove = await deletePackageContents(key, {
+      records: group.records,
+      packageId: group.packageId,
+      questionIds: [...ids],
+      confirmUser: false,
+      quiet: true
+    });
+    if (didRemove) removed += group.questionIds.size;
+  }
+  return removed;
 }
 function openImportTaskBuilder(key) {
   const group=findImportGroup(key); if(!group) return toast('Pacote não encontrado.');
@@ -2034,7 +2163,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.2.0');
+  await setSetting(state.db, 'appVersion', '1.5.2');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2230,16 +2359,7 @@ document.addEventListener('click', async event => {
     else if (action === 'print-performance') window.print();
     else if (action === 'clear-performance-filters') { state.performancePeriod='all'; state.performanceArea=''; state.performanceSubject=''; state.performanceTopic=''; renderPerformance(); }
     else if (action === 'package-details') openPackageDetails(actionButton.dataset.packageKey);
-    else if (action === 'remove-package-history') {
-      const group=findImportGroup(actionButton.dataset.packageKey);
-      if(group && confirm(`Remover ${group.records.length} registro(s) de histórico de "${group.name}"?
-
-As questões, imagens, tarefas, respostas e atividades serão preservadas.`)) {
-        state.selectedPackageKeys.delete(group.key);
-        await deleteRecords(state.db,'imports',group.records.map(record=>record.id)); await refreshData(); toast('Histórico do pacote removido. Conteúdo preservado.');
-      }
-    }
-    else if (action === 'remove-import-history') await removeImportHistoryRecord(actionButton.dataset.id);
+    else if (action === 'delete-import-package-from-record') await deleteImportPackageFromRecord(actionButton.dataset.id);
     else if (action === 'delete-package') await deleteImportPackage(actionButton.dataset.packageKey);
     else if (action === 'save-import-task') await saveImportTask(false);
     else if (action === 'resolve-import-task') await saveImportTask(true);
@@ -2401,6 +2521,8 @@ async function initialize() {
   try {
     if (!('indexedDB' in window)) throw new Error('Este navegador não oferece IndexedDB, necessário para armazenar seu banco local.');
     state.db = await openDB();
+    await refreshData(false);
+    await cleanupPreviouslyDeletedPackages();
     await refreshData();
     const running = state.data.activities.filter(item=>item.status==='running').sort((a,b)=>Date.parse(b.startedAt)-Date.parse(a.startedAt))[0];
     if (running) {
