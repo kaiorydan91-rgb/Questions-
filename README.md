@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.5.1
+# Grafia Questions — versão 1.5.2
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -51,7 +51,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.5.1.md` para as mudanças mais recentes e `CHANGELOG_v1.5.0.md` para o histórico anterior.
+Consulte `CHANGELOG_v1.5.2.md` para as mudanças mais recentes e os changelogs anteriores para o histórico de versões.
 
 ## Estrutura do projeto
 
@@ -78,12 +78,13 @@ CHANGELOG_v1.3.0.md
 CHANGELOG_v1.4.0.md
 CHANGELOG_v1.5.0.md
 CHANGELOG_v1.5.1.md
+CHANGELOG_v1.5.2.md
 README.md
 ```
 
 ## Evolução das versões anteriores
 
-A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente. A versão 1.5.0 acrescenta histórico completo e gestão segura de pacotes, tarefas pendentes, seleção de questões de vários pacotes, desempenho com filtros combinados por período/área/matéria/assunto, análise por dificuldade, autodiagnóstico dos erros e recomendações de estudo. A versão 1.5.1 permite substituir duplicatas por uma versão importada menos completa, com histórico e restauração das versões anteriores.
+A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente. A versão 1.5.0 acrescenta histórico completo e gestão segura de pacotes, tarefas pendentes, seleção de questões de vários pacotes, desempenho com filtros combinados por período/área/matéria/assunto, análise por dificuldade, autodiagnóstico dos erros e recomendações de estudo. A versão 1.5.1 permite substituir duplicatas por uma versão importada menos completa, com histórico e restauração das versões anteriores. A versão 1.5.2 faz a exclusão de pacotes remover também todas as questões vinculadas e limpa questões órfãs deixadas por exclusões feitas em versões anteriores.
 
 ## Atualização 1.0.4
 
@@ -152,3 +153,12 @@ A barra inferior voltou a exibir ícones próprios para as seis áreas. O indica
 - A substituição mantém o ID original da questão, a data de criação, favoritos e histórico de respostas, além de preservar até cinco versões anteriores.
 - A tela de detalhes da questão permite restaurar uma das versões anteriores; a versão que estava ativa também é arquivada.
 - Não há alteração estrutural no IndexedDB. A atualização preserva os bancos locais e backups da versão 1.5.0. O cache offline foi atualizado para 1.5.1.
+
+
+## v1.5.2
+
+- Excluir um pacote agora remove todas as questões vinculadas a ele, mesmo quando também aparecem em outros pacotes, coleções ou favoritos. Referências de tarefas pendentes, atividades em andamento, revisões, coleções e outros registros de importação são atualizadas para não deixar vínculos quebrados.
+- A ação de histórico passou a ser explícita: **Excluir pacote e questões**. Não existe mais uma opção de apagar apenas o histórico e deixar as questões importadas soltas no banco.
+- Na primeira abertura, o Grafia consulta o diário local de alterações para identificar pacotes apagados em versões anteriores e remover as questões órfãs que ficaram para trás.
+- Atividades concluídas e resultados anteriores são preservados. A exclusão de um pacote não apaga o histórico de desempenho já concluído.
+- Não há alteração estrutural no IndexedDB. O cache offline foi atualizado para 1.5.2.
