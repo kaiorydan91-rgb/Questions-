@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.5.0
+# Grafia Questions — versão 1.5.1
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -30,7 +30,7 @@ O fluxo utiliza dois arquivos separados:
 
 Consulte `SCHEMA_PACOTE.md` e `MODELO_PACOTE.json`. O modelo começa com `questions: []`; não é um conjunto de questões fictícias.
 
-A importação verifica a estrutura, IDs estáveis e únicos, referências de imagens, textos-base, correspondência entre área e matéria, questões incompletas e duplicatas. Um `assetId` já existente não pode ser reutilizado para outro arquivo de imagem: o conteúdo é comparado para impedir que questões antigas passem a apontar silenciosamente para uma imagem diferente. Um ID já existente com enunciado/alternativas diferentes bloqueia a importação para evitar mesclagem acidental. Questões incompletas podem ser editadas ou removidas da importação. Conflitos de gabarito exigem uma escolha explícita. A análise de JSON e ZIP roda em um Web Worker quando o navegador oferece suporte, reduzindo o bloqueio da interface. A gravação ocorre em lotes de até 200 questões e 100 imagens. Se o navegador interromper a operação, reanalise o mesmo par JSON/ZIP para retomar por identificadores e deduplicação; esta versão ainda não usa um cursor de retomada formal. O ZIP é verificado por tamanho e CRC antes de os arquivos serem armazenados.
+A importação verifica a estrutura, IDs estáveis e únicos, referências de imagens, textos-base, correspondência entre área e matéria, questões incompletas e duplicatas. Um `assetId` já existente não pode ser reutilizado para outro arquivo de imagem: o conteúdo é comparado para impedir que questões antigas passem a apontar silenciosamente para uma imagem diferente. Um ID já existente com enunciado/alternativas diferentes bloqueia a importação para evitar mesclagem acidental. Para detectar questões iguais com IDs de imagens ou textos-base diferentes, a comparação também considera o conteúdo do enunciado e das alternativas; quando essa correspondência textual é usada, a importação exige uma decisão manual para evitar unir questões com figuras diferentes. Em cada duplicata, escolha enriquecer, manter a versão atual ou substituir pela versão importada, mesmo que ela tenha menos informações. A substituição preserva os IDs usados por atividades e respostas, mantém favoritos e histórico de respostas, guarda até cinco versões anteriores e permite restaurá-las na tela de detalhes da questão. Questões incompletas podem ser editadas ou removidas da importação. A análise de JSON e ZIP roda em um Web Worker quando o navegador oferece suporte, reduzindo o bloqueio da interface. A gravação ocorre em lotes de até 200 questões e 100 imagens. Se o navegador interromper a operação, reanalise o mesmo par JSON/ZIP para retomar por identificadores e deduplicação; esta versão ainda não usa um cursor de retomada formal. O ZIP é verificado por tamanho e CRC antes de os arquivos serem armazenados.
 
 ## Backups
 
@@ -39,7 +39,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 - **Pacote de questões:** exporta um JSON e, quando necessário, um ZIP opcional de imagens.
 - **Restauração completa:** permite mesclar ou substituir. A substituição dispara antes o download de um backup de segurança e grava os dados em uma transação IndexedDB. Depois de criar qualquer backup, confirme que o arquivo foi salvo antes de avançar o checkpoint incremental; sem essa confirmação, as alterações continuam incluídas no próximo backup.
 
-## Limites conhecidos da versão 1.5.0
+## Limites conhecidos das versões 1.5.x
 
 - A estimativa de proficiência inspirada na TRI é experimental e só aparece com parâmetros `a`, `b` e `c` fornecidos no pacote; não é uma nota oficial do ENEM.
 - A estimativa não deve ser interpretada sem calibração empírica dos parâmetros.
@@ -51,7 +51,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.5.0.md` para os ajustes desta versão.
+Consulte `CHANGELOG_v1.5.1.md` para as mudanças mais recentes e `CHANGELOG_v1.5.0.md` para o histórico anterior.
 
 ## Estrutura do projeto
 
@@ -77,12 +77,13 @@ CHANGELOG_v1.1.0.md
 CHANGELOG_v1.3.0.md
 CHANGELOG_v1.4.0.md
 CHANGELOG_v1.5.0.md
+CHANGELOG_v1.5.1.md
 README.md
 ```
 
 ## Evolução das versões anteriores
 
-A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente. A versão 1.5.0 acrescenta histórico completo e gestão segura de pacotes, tarefas pendentes, seleção de questões de vários pacotes, desempenho com filtros combinados por período/área/matéria/assunto, análise por dificuldade, autodiagnóstico dos erros e recomendações de estudo.
+A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente. A versão 1.5.0 acrescenta histórico completo e gestão segura de pacotes, tarefas pendentes, seleção de questões de vários pacotes, desempenho com filtros combinados por período/área/matéria/assunto, análise por dificuldade, autodiagnóstico dos erros e recomendações de estudo. A versão 1.5.1 permite substituir duplicatas por uma versão importada menos completa, com histórico e restauração das versões anteriores.
 
 ## Atualização 1.0.4
 
@@ -141,3 +142,13 @@ A barra inferior voltou a exibir ícones próprios para as seis áreas. O indica
 - Relatório: botão para imprimir ou salvar o painel de desempenho como PDF pelo diálogo de impressão do navegador.
 - Compatibilidade: não há alteração de estrutura do IndexedDB. A versão 1.5.0 atualiza o identificador do aplicativo e o cache do Service Worker, preservando os bancos locais e backups anteriores.
 - A estimativa inspirada na TRI continua experimental e só usa itens com parâmetros calibrados; não representa uma nota oficial.
+
+
+## v1.5.1
+
+- A detecção de duplicatas agora reconhece questões com enunciado e alternativas idênticos mesmo quando os IDs das imagens ou do texto-base diferem. Correspondências somente pelo conteúdo exigem escolha manual.
+- Cada duplicata pode ser enriquecida, mantida como está ou substituída integralmente pela versão importada, independentemente da quantidade de informações.
+- A prévia compara a quantidade de informações da versão atual e da importada, destacando quando a importada contém menos dados e oferecendo uma ação em lote para marcar essas substituições; cada questão ainda pode ser ajustada individualmente.
+- A substituição mantém o ID original da questão, a data de criação, favoritos e histórico de respostas, além de preservar até cinco versões anteriores.
+- A tela de detalhes da questão permite restaurar uma das versões anteriores; a versão que estava ativa também é arquivada.
+- Não há alteração estrutural no IndexedDB. A atualização preserva os bancos locais e backups da versão 1.5.0. O cache offline foi atualizado para 1.5.1.
