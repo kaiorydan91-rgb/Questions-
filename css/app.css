@@ -509,7 +509,7 @@ input:not([type=checkbox]):not([type=radio]), select, textarea { padding: 8px 9p
 .page-heading h1 { font-size: clamp(27px, 3vw, 35px); }
 
 
-/* Grafia Questions 1.5.1 — substituição segura de duplicatas */
+/* Grafia Questions 1.5.2 — exclusão vinculada de pacotes */
 .bank-tabs { display:flex; gap:8px; margin:0 0 12px; padding:4px; border:1px solid var(--line); border-radius:14px; background:rgba(25,29,53,.72); }
 .bank-tab { flex:1; min-height:38px; border:0; border-radius:10px; background:transparent; color:var(--muted); font:inherit; font-size:12px; font-weight:750; cursor:pointer; }
 .bank-tab.active { background:var(--surface-2); color:var(--text); box-shadow:0 3px 12px rgba(0,0,0,.18); }
