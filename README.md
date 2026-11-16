@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.5.2
+# Grafia Questions — versão 1.5.3
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -51,7 +51,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.5.2.md` para as mudanças mais recentes e os changelogs anteriores para o histórico de versões.
+Consulte `CHANGELOG_v1.5.3.md` para as mudanças mais recentes e os changelogs anteriores para o histórico de versões.
 
 ## Estrutura do projeto
 
@@ -79,12 +79,13 @@ CHANGELOG_v1.4.0.md
 CHANGELOG_v1.5.0.md
 CHANGELOG_v1.5.1.md
 CHANGELOG_v1.5.2.md
+CHANGELOG_v1.5.3.md
 README.md
 ```
 
 ## Evolução das versões anteriores
 
-A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente. A versão 1.5.0 acrescenta histórico completo e gestão segura de pacotes, tarefas pendentes, seleção de questões de vários pacotes, desempenho com filtros combinados por período/área/matéria/assunto, análise por dificuldade, autodiagnóstico dos erros e recomendações de estudo. A versão 1.5.1 permite substituir duplicatas por uma versão importada menos completa, com histórico e restauração das versões anteriores. A versão 1.5.2 faz a exclusão de pacotes remover também todas as questões vinculadas e limpa questões órfãs deixadas por exclusões feitas em versões anteriores.
+A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente. A versão 1.5.0 acrescenta histórico completo e gestão segura de pacotes, tarefas pendentes, seleção de questões de vários pacotes, desempenho com filtros combinados por período/área/matéria/assunto, análise por dificuldade, autodiagnóstico dos erros e recomendações de estudo. A versão 1.5.1 permite substituir duplicatas por uma versão importada menos completa, com histórico e restauração das versões anteriores. A versão 1.5.2 faz a exclusão de pacotes remover também todas as questões vinculadas e limpa questões órfãs deixadas por exclusões feitas em versões anteriores. A versão 1.5.3 permite pausar várias atividades, sair para criar novas tarefas e retomar cada uma com respostas e tempo preservados.
 
 ## Atualização 1.0.4
 
@@ -162,3 +163,14 @@ A barra inferior voltou a exibir ícones próprios para as seis áreas. O indica
 - Na primeira abertura, o Grafia consulta o diário local de alterações para identificar pacotes apagados em versões anteriores e remover as questões órfãs que ficaram para trás.
 - Atividades concluídas e resultados anteriores são preservados. A exclusão de um pacote não apaga o histórico de desempenho já concluído.
 - Não há alteração estrutural no IndexedDB. O cache offline foi atualizado para 1.5.2.
+
+
+## v1.5.3
+
+- Atividades em execução podem ser pausadas por **Salvar e sair**, voltando à tela de criação.
+- A área **Atividades salvas** lista tarefas pausadas, mostra o progresso e permite continuar ou excluir cada uma.
+- É possível acumular várias atividades pausadas e criar novas sem substituir as anteriores.
+- O cronômetro acumula apenas o tempo de execução e mantém o tempo restante quando a atividade é pausada.
+- As respostas, grifos, marcações de revisão e alternativas eliminadas continuam vinculadas à atividade salva.
+- A exclusão de questões de um pacote agora também atualiza atividades pausadas.
+- Nenhuma mudança estrutural no IndexedDB; a nova versão preserva os dados locais existentes. O cache offline foi atualizado para 1.5.3.
