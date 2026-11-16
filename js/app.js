@@ -409,10 +409,37 @@ function renderActivityTopicList() {
   if (summary) summary.textContent = count ? `${count} assunto${count === 1 ? '' : 's'} selecionado${count === 1 ? '' : 's'}` : 'Nenhum assunto selecionado';
 }
 
+function renderSavedActivities() {
+  const section = $('#savedActivitiesSection');
+  if (!section) return;
+  const saved = state.data.activities
+    .filter(item => item.status === 'paused')
+    .sort((a, b) => Date.parse(b.pausedAt || b.updatedAt || b.createdAt) - Date.parse(a.pausedAt || a.updatedAt || a.createdAt));
+  section.classList.toggle('hidden', saved.length === 0);
+  $('#savedActivitiesCount').textContent = String(saved.length);
+  $('#savedActivitiesList').innerHTML = saved.map(activity => {
+    const questions = (activity.questionIds || []).map(questionById).filter(Boolean);
+    const answersByQuestion = new Map(state.data.answers.filter(answer => answer.activityId === activity.id).map(answer => [answer.questionId, answer]));
+    const answered = questions.filter(question => responseIsComplete(question, answersByQuestion.get(question.id)?.response)).length;
+    const partial = questions.filter(question => {
+      const response = answersByQuestion.get(question.id)?.response;
+      return response != null && String(response).trim() !== '' && !responseIsComplete(question, response);
+    }).length;
+    const total = questions.length;
+    const started = answered + partial;
+    const percentage = total ? Math.round(started / total * 100) : 0;
+    const lastSaved = activity.pausedAt || activity.updatedAt || activity.createdAt;
+    const progressLabel = `${answered} respondidas${partial ? ` · ${partial} parciais` : ''} · ${Math.max(0, total - started)} restantes`;
+    return `<article class="saved-activity-item"><div class="saved-activity-main"><div class="saved-activity-heading"><b>${escapeHTML(activity.title || 'Atividade sem título')}</b><span class="saved-activity-status">Salva</span></div><div class="saved-activity-meta"><span>${progressLabel} (${total} questões)</span><span>Salva em ${formatDate(lastSaved, true)}</span></div><div class="saved-activity-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><i style="width:${percentage}%"></i></div></div><div class="saved-activity-actions"><button class="button small primary" data-action="resume-activity" data-id="${safeAttr(activity.id)}">Continuar</button><button class="button small secondary" data-action="delete-saved-activity" data-id="${safeAttr(activity.id)}">Excluir</button></div></article>`;
+  }).join('');
+}
+
 function renderActivityBuilder() {
   renderPendingTasks();
+  renderSavedActivities();
   if (state.currentActivity?.status === 'running') {
     $('#pendingTaskSection')?.classList.add('hidden');
+    $('#savedActivitiesSection')?.classList.add('hidden');
     $('.activity-layout').classList.add('hidden');
     $('#activityNoQuestions').classList.add('hidden');
     $('#activitySession').classList.remove('hidden');
@@ -542,7 +569,7 @@ async function makeActivity() {
   if (!selected.length) return toast('Não foi possível montar a atividade.');
   const activity = {
     id: makeId('activity'), title: `Atividade · ${new Date().toLocaleDateString('pt-BR')}`,
-    questionIds: selected.map(q => q.id), status: 'running', createdAt: nowISO(), startedAt: nowISO(),
+    questionIds: selected.map(q => q.id), status: 'running', createdAt: nowISO(), startedAt: nowISO(), activeSince: nowISO(), elapsedSecs: 0,
     config: {
       correctionMode: $('#correctionMode').value, showErrors: $('#showErrors').checked,
       commentMode: $('#commentMode').value, navigationMode: $('#navigationMode').value,
@@ -720,7 +747,7 @@ async function renderSession() {
     const answer = state.activityAnswers.get(q.id);
     const textBase = textBaseById(q.textBaseId);
     return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${q.explanation || Object.keys(q.alternativeExplanations || {}).length ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem" data-statement-for="${safeAttr(q.id)}">${richText(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, activity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
-  }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid">${questions.map((q,index) => `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button">${index + 1}</button>`).join('')}</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Sair e continuar depois</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
+  }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid">${questions.map((q,index) => `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button">${index + 1}</button>`).join('')}</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('#activitySession').innerHTML = html;
   $('.activity-layout').classList.add('hidden');
@@ -778,22 +805,32 @@ async function toggleReviewMark(questionId) {
   const navButton = document.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
   if (navButton) navButton.classList.toggle('review-mark', next.markedForReview);
 }
+function activityElapsedSeconds(activity, now = Date.now()) {
+  if (!activity) return 0;
+  const hasStoredElapsed = Number.isFinite(Number(activity.elapsedSecs));
+  const accumulated = hasStoredElapsed ? Math.max(0, Number(activity.elapsedSecs)) : 0;
+  const activeSince = activity.activeSince || (!hasStoredElapsed && activity.status === 'running' ? activity.startedAt : null);
+  return accumulated + (activeSince ? timeAgoSeconds(activeSince, now) : 0);
+}
 function startActivityTimer() {
   clearInterval(state.activityTimer);
   if (!state.currentActivity?.config.timerEnabled) return;
-  state.activityStart = Date.parse(state.currentActivity.startedAt) || Date.now();
-  state.activityTimer = setInterval(() => {
-    const limit = state.currentActivity.config.timerMinutes * 60;
-    const remaining = limit - timeAgoSeconds(state.activityStart);
+  state.activityStart = Date.parse(state.currentActivity.activeSince || state.currentActivity.startedAt) || Date.now();
+  const tick = () => {
+    if (!state.currentActivity || state.currentActivity.status !== 'running') { clearInterval(state.activityTimer); return; }
+    const limit = Math.max(1, Number(state.currentActivity.config.timerMinutes) || 90) * 60;
+    const remaining = limit - activityElapsedSeconds(state.currentActivity);
     updateTimerLabel(remaining);
     if (remaining <= 0) { clearInterval(state.activityTimer); finishActivity(true).catch(error => { state.finishingActivityId = null; console.error(error); toast('Não foi possível concluir a atividade automaticamente. Suas respostas continuam salvas.', 6000); }); }
-  }, 1000);
+  };
+  tick();
+  state.activityTimer = setInterval(tick, 1000);
 }
 function updateTimerLabel(remaining = null) {
   const element = $('#activityTimerDisplay');
   if (!element || !state.currentActivity?.config.timerEnabled) return;
-  const total = state.currentActivity.config.timerMinutes * 60;
-  const left = remaining == null ? Math.max(0, total - timeAgoSeconds(state.activityStart || state.currentActivity.startedAt)) : remaining;
+  const total = Math.max(1, Number(state.currentActivity.config.timerMinutes) || 90) * 60;
+  const left = remaining == null ? Math.max(0, total - activityElapsedSeconds(state.currentActivity)) : remaining;
   const h = Math.floor(left / 3600); const m = Math.floor(left % 3600 / 60); const s = Math.floor(left % 60);
   element.textContent = `⏱ ${h ? `${String(h).padStart(2,'0')}:` : ''}${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
@@ -839,7 +876,7 @@ async function finishActivity(timeExpired = false) {
     responseRecords.push({ question, answer: updated, isCorrect, hasResponse });
   }
   await writeBatch(state.db, { answers: answerUpdates, ...(reviewUpdates.length ? { reviews: reviewUpdates } : {}) });
-  const durationSecs = timeAgoSeconds(activity.startedAt, Date.now());
+  const durationSecs = activityElapsedSeconds(activity);
   const resultRecords = responseRecords.map(item => ({ question: item.question, hasResponse: item.hasResponse, isCorrect: item.isCorrect }));
   const triEstimate = estimateTriTheta(resultRecords);
   const difficultyConsistency = calculateDifficultyConsistency(resultRecords);
@@ -849,7 +886,7 @@ async function finishActivity(timeExpired = false) {
     netScore: Number(netScore.toFixed(3)), rawScore: correct,
     triEstimate, difficultyConsistency, durationSecs, timeExpired, finishedAt: nowISO()
   };
-  const completed = { ...activity, status: 'completed', endedAt: nowISO(), durationSecs, result, updatedAt: nowISO() };
+  const completed = { ...activity, status: 'completed', activeSince: null, elapsedSecs: durationSecs, endedAt: nowISO(), durationSecs, result, updatedAt: nowISO() };
   await putRecord(state.db, 'activities', completed);
   state.currentActivity = completed;
   await refreshData();
@@ -886,7 +923,7 @@ async function renderResult(activity) {
     const textBase = textBaseById(q.textBaseId);
     return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${richText(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b><p>${richText(selectedAlternativeExplanation)}</p></div>` : ''}${q.explanation ? `<div class="full-explanation"><b>Resolução completa</b><p>${richText(q.explanation)}</p></div>` : ''}${complete && !responseIsCorrect(q,answer.response) ? `<label class="error-reason-inline"><span>O que melhor explica esse erro?</span><select data-error-reason data-answer-id="${safeAttr(answer.id)}"><option value="">Selecione o motivo</option><option value="content" ${answer.errorReason==='content'?'selected':''}>Falta de conteúdo</option><option value="interpretation" ${answer.errorReason==='interpretation'?'selected':''}>Interpretação do enunciado</option><option value="calculation" ${answer.errorReason==='calculation'?'selected':''}>Erro de cálculo</option><option value="confusion" ${answer.errorReason==='confusion'?'selected':''}>Confusão conceitual</option><option value="time" ${answer.errorReason==='time'?'selected':''}>Gestão do tempo</option><option value="insecurity" ${answer.errorReason==='insecurity'?'selected':''}>Insegurança na escolha</option><option value="other" ${answer.errorReason==='other'?'selected':''}>Outro motivo</option></select></label>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
   }).join('')}</div><div class="exam-bottom"><button class="button secondary" data-page="performance">Ver desempenho</button><button class="button primary" data-action="new-activity">Voltar ao gerador</button></div></div>`;
-  $('.activity-layout').classList.add('hidden'); $('#pendingTaskSection')?.classList.add('hidden'); $('#activityNoQuestions').classList.add('hidden'); $('#activitySession').classList.remove('hidden');
+  $('.activity-layout').classList.add('hidden'); $('#pendingTaskSection')?.classList.add('hidden'); $('#savedActivitiesSection')?.classList.add('hidden'); $('#activityNoQuestions').classList.add('hidden'); $('#activitySession').classList.remove('hidden');
   for (const question of questions) {
     const marks = state.activityAnswers.get(question.id)?.highlights || [];
     applyTextMarks($(`[data-result-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement');
@@ -1286,14 +1323,14 @@ async function deletePackageContents(key, { records: suppliedRecords = null, pac
   const updatedActivities = [];
   const deletedActivityIds = new Set();
   for (const activity of state.data.activities) {
-    if (!['pending', 'running'].includes(activity.status) || !Array.isArray(activity.questionIds)) continue;
+    if (!['pending', 'running', 'paused'].includes(activity.status) || !Array.isArray(activity.questionIds)) continue;
     const filteredIds = activity.questionIds.filter(id => !allQuestionIds.has(String(id)));
     if (filteredIds.length === activity.questionIds.length) continue;
     if (!filteredIds.length) deletedActivityIds.add(activity.id);
     else updatedActivities.push({ ...activity, questionIds: filteredIds, updatedAt: nowISO() });
   }
   const answerIdsToDelete = state.data.answers.filter(answer =>
-    deletedActivityIds.has(answer.activityId) || (allQuestionIds.has(String(answer.questionId)) && state.data.activities.some(activity => activity.id === answer.activityId && ['pending', 'running'].includes(activity.status)))
+    deletedActivityIds.has(answer.activityId) || (allQuestionIds.has(String(answer.questionId)) && state.data.activities.some(activity => activity.id === answer.activityId && ['pending', 'running', 'paused'].includes(activity.status)))
   ).map(answer => answer.id);
   const reviewIdsToDelete = state.data.reviews.filter(review => allQuestionIds.has(String(review.questionId))).map(review => review.id);
   const aliasIdsToDelete = state.data.aliases.filter(alias => allQuestionIds.has(String(alias.questionId))).map(alias => alias.alias);
@@ -1400,7 +1437,7 @@ async function cleanupPreviouslyDeletedPackages() {
       (collection.type === 'sourceExam' && String(collection.packageId || '') === key) ||
       [...(collection.questionIds || []), ...(collection.originalOrder || [])].some(id => ids.has(String(id)))
     );
-    const hasActiveTaskReference = state.data.activities.some(activity => ['pending', 'running'].includes(activity.status) && (activity.questionIds || []).some(id => ids.has(String(id))));
+    const hasActiveTaskReference = state.data.activities.some(activity => ['pending', 'running', 'paused'].includes(activity.status) && (activity.questionIds || []).some(id => ids.has(String(id))));
     const hasReviewReference = state.data.reviews.some(review => ids.has(String(review.questionId)));
     const hasAliasReference = state.data.aliases.some(alias => ids.has(String(alias.questionId)));
     if (!hasQuestion && !hasImportReference && !hasCollectionReference && !hasActiveTaskReference && !hasReviewReference && !hasAliasReference) continue;
@@ -1493,7 +1530,7 @@ async function startPendingTask(id) {
   const pending=state.data.activities.find(item=>item.id===id&&item.status==='pending'); if(!pending) return;
   const running=state.data.activities.find(item=>item.status==='running');
   if(running){state.currentActivity=running;await loadActivityAnswers(running.id);pageNavigate('activity');return toast('Conclua ou retome a atividade em andamento antes de iniciar outra.');}
-  const started={...pending,status:'running',startedAt:nowISO(),updatedAt:nowISO()};
+  const started={...pending,status:'running',startedAt:nowISO(),activeSince:nowISO(),elapsedSecs:0,updatedAt:nowISO()};
   await putRecord(state.db,'activities',started); state.currentActivity=started; state.activityStart=Date.now();
   await refreshData(); await loadActivityAnswers(started.id); pageNavigate('activity'); renderSession(); startActivityTimer();
 }
@@ -1826,7 +1863,7 @@ async function createActivityFromIds(ids, title) {
     return;
   }
   const validIds = [...new Set(ids.filter(id=>questionById(id)))]; if (!validIds.length) return;
-  const activity = { id: makeId('activity'), title, questionIds: validIds, status: 'running', createdAt: nowISO(), startedAt: nowISO(), config: { correctionMode: 'end', showErrors: false, commentMode: 'available', navigationMode: 'free', timerEnabled: false, timerMinutes: 90, negativeScoring: false, strategy: 'import' } };
+  const activity = { id: makeId('activity'), title, questionIds: validIds, status: 'running', createdAt: nowISO(), startedAt: nowISO(), activeSince: nowISO(), elapsedSecs: 0, config: { correctionMode: 'end', showErrors: false, commentMode: 'available', navigationMode: 'free', timerEnabled: false, timerMinutes: 90, negativeScoring: false, strategy: 'import' } };
   await putRecord(state.db, 'activities', activity); state.currentActivity = activity; state.activityAnswers = new Map(); state.activityStart = Date.now(); await refreshData(); pageNavigate('activity');
 }
 
@@ -2163,7 +2200,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.5.2');
+  await setSetting(state.db, 'appVersion', '1.5.3');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2171,6 +2208,50 @@ async function clearDatabase() {
 
 function showSettings() { pageNavigate('settings'); }
 function newActivityFromBuilder() { state.currentActivity = null; clearInterval(state.activityTimer); pageNavigate('activity'); renderActivityBuilder(); }
+async function pauseCurrentActivity() {
+  const activity = state.currentActivity;
+  if (!activity || activity.status !== 'running') return;
+  clearInterval(state.activityTimer);
+  const elapsedSecs = activityElapsedSeconds(activity);
+  const paused = { ...activity, status: 'paused', activeSince: null, elapsedSecs, pausedAt: nowISO(), updatedAt: nowISO() };
+  await putRecord(state.db, 'activities', paused);
+  state.data.activities = state.data.activities.map(item => item.id === paused.id ? paused : item);
+  state.currentActivity = null;
+  state.activityAnswers.clear();
+  state.activityStart = null;
+  await refreshData(false);
+  pageNavigate('activity');
+  toast('Atividade salva. Você pode criar outra ou continuar esta depois.');
+}
+async function resumeSavedActivity(id) {
+  const activity = state.data.activities.find(item => item.id === id && item.status === 'paused');
+  if (!activity) return toast('Esta atividade salva não está mais disponível.');
+  const running = state.data.activities.find(item => item.status === 'running' && item.id !== id);
+  if (running) {
+    state.currentActivity = running;
+    await loadActivityAnswers(running.id);
+    pageNavigate('activity');
+    return toast('Salve ou conclua a atividade aberta antes de retomar outra.');
+  }
+  const resumed = { ...activity, status: 'running', activeSince: nowISO(), resumedAt: nowISO(), updatedAt: nowISO() };
+  await putRecord(state.db, 'activities', resumed);
+  state.currentActivity = resumed;
+  await refreshData(false);
+  await loadActivityAnswers(resumed.id);
+  pageNavigate('activity');
+  startActivityTimer();
+}
+async function deleteSavedActivity(id) {
+  const activity = state.data.activities.find(item => item.id === id && item.status === 'paused');
+  if (!activity) return;
+  if (!confirm(`Excluir a atividade salva "${activity.title || 'Atividade'}"? As respostas e marcações dessa atividade serão apagadas, mas as questões continuarão no banco.`)) return;
+  const relatedAnswers = state.data.answers.filter(item => item.activityId === id).map(item => item.id);
+  if (relatedAnswers.length) await deleteRecords(state.db, 'answers', relatedAnswers);
+  await deleteRecord(state.db, 'activities', id);
+  await refreshData(false);
+  renderActivityBuilder();
+  toast('Atividade salva excluída. As questões continuam no banco.');
+}
 async function discardCurrentActivity() {
   const activity = state.currentActivity;
   if (!activity || activity.status !== 'running') return;
@@ -2381,8 +2462,10 @@ document.addEventListener('click', async event => {
     else if (action === 'save-question-edit') await saveQuestionEdit(actionButton.dataset.id);
     else if (action === 'finish-activity') await finishActivity(false);
     else if (action === 'discard-activity') await discardCurrentActivity();
+    else if (action === 'resume-activity') await resumeSavedActivity(actionButton.dataset.id);
+    else if (action === 'delete-saved-activity') await deleteSavedActivity(actionButton.dataset.id);
     else if (action === 'toggle-text-highlight') await toggleTextHighlight();
-    else if (action === 'exit-activity') { pageNavigate('home'); toast('Atividade salva automaticamente. Volte à área Atividades para continuar.'); }
+    else if (action === 'exit-activity') await pauseCurrentActivity();
     else if (action === 'mark-review') await toggleReviewMark(actionButton.dataset.id);
     else if (action === 'new-activity') newActivityFromBuilder();
     else if (action === 'review-now') await createActivityFromIds([actionButton.dataset.id], 'Revisão de questão');
