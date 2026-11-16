@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.5.3
+# Grafia Questions — versão 1.6.0
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -23,20 +23,17 @@ Não abra o `index.html` diretamente pelo gerenciador de arquivos para uso perma
 
 ## Importar questões
 
-O fluxo utiliza dois arquivos separados:
-
-1. JSON obrigatório (`schemaVersion: "1.0.0"`), com questões, alternativas, gabaritos, resoluções, classificação e referências às imagens.
-2. ZIP opcional com as imagens referenciadas no JSON.
+O fluxo recomendado utiliza **um único ZIP completo**, contendo exatamente um JSON de dados (`schemaVersion: "1.0.0"`) e os arquivos de imagem referenciados por ele. O JSON pode ficar na raiz ou em uma pasta interna; os caminhos das imagens devem corresponder às referências do pacote. O formato antigo com JSON obrigatório e ZIP opcional de imagens continua aceito para compatibilidade.
 
 Consulte `SCHEMA_PACOTE.md` e `MODELO_PACOTE.json`. O modelo começa com `questions: []`; não é um conjunto de questões fictícias.
 
-A importação verifica a estrutura, IDs estáveis e únicos, referências de imagens, textos-base, correspondência entre área e matéria, questões incompletas e duplicatas. Um `assetId` já existente não pode ser reutilizado para outro arquivo de imagem: o conteúdo é comparado para impedir que questões antigas passem a apontar silenciosamente para uma imagem diferente. Um ID já existente com enunciado/alternativas diferentes bloqueia a importação para evitar mesclagem acidental. Para detectar questões iguais com IDs de imagens ou textos-base diferentes, a comparação também considera o conteúdo do enunciado e das alternativas; quando essa correspondência textual é usada, a importação exige uma decisão manual para evitar unir questões com figuras diferentes. Em cada duplicata, escolha enriquecer, manter a versão atual ou substituir pela versão importada, mesmo que ela tenha menos informações. A substituição preserva os IDs usados por atividades e respostas, mantém favoritos e histórico de respostas, guarda até cinco versões anteriores e permite restaurá-las na tela de detalhes da questão. Questões incompletas podem ser editadas ou removidas da importação. A análise de JSON e ZIP roda em um Web Worker quando o navegador oferece suporte, reduzindo o bloqueio da interface. A gravação ocorre em lotes de até 200 questões e 100 imagens. Se o navegador interromper a operação, reanalise o mesmo par JSON/ZIP para retomar por identificadores e deduplicação; esta versão ainda não usa um cursor de retomada formal. O ZIP é verificado por tamanho e CRC antes de os arquivos serem armazenados.
+A importação verifica a estrutura, IDs estáveis e únicos, referências de imagens, textos-base, correspondência entre área e matéria, questões incompletas e duplicatas. Ela também tenta detectar, de forma conservadora, blocos longos idênticos repetidos no início dos enunciados e convertê-los em textos-base compartilhados; a prévia informa quando isso ocorreu. Um `assetId` já existente não pode ser reutilizado para outro arquivo de imagem: o conteúdo é comparado para impedir que questões antigas passem a apontar silenciosamente para uma imagem diferente. Um ID já existente com enunciado/alternativas diferentes bloqueia a importação para evitar mesclagem acidental. Para detectar questões iguais com IDs de imagens ou textos-base diferentes, a comparação também considera o conteúdo do enunciado e das alternativas; quando essa correspondência textual é usada, a importação exige uma decisão manual para evitar unir questões com figuras diferentes. Em cada duplicata, escolha enriquecer, manter a versão atual ou substituir pela versão importada, mesmo que ela tenha menos informações. A substituição preserva os IDs usados por atividades e respostas, mantém favoritos e histórico de respostas, guarda até cinco versões anteriores e permite restaurá-las na tela de detalhes da questão. Questões incompletas podem ser editadas ou removidas da importação. A análise de JSON e ZIP roda em um Web Worker quando o navegador oferece suporte, reduzindo o bloqueio da interface. A gravação ocorre em lotes de até 200 questões e 100 imagens. Se o navegador interromper a operação, reanalise o mesmo par JSON/ZIP para retomar por identificadores e deduplicação; esta versão ainda não usa um cursor de retomada formal. O ZIP é verificado por tamanho e CRC antes de os arquivos serem armazenados.
 
 ## Backups
 
 - **Completo:** exporta banco, histórico, respostas, revisões, notas, coleções, configurações e imagens em um ZIP.
 - **Incremental:** exporta alterações posteriores ao último checkpoint. O checkpoint usa a sequência monotônica do diário interno do IndexedDB, não horário de relógio, para evitar perder alterações que ocorram no mesmo milissegundo. Faça um backup completo antes do primeiro incremental; o incremental só pode ser aplicado ao banco de origem correspondente e na sequência correta.
-- **Pacote de questões:** exporta um JSON e, quando necessário, um ZIP opcional de imagens.
+- **Pacote de questões:** exporta um único ZIP com `grafia-package.json` e a pasta `imagens/`, pronto para ser importado de uma só vez.
 - **Restauração completa:** permite mesclar ou substituir. A substituição dispara antes o download de um backup de segurança e grava os dados em uma transação IndexedDB. Depois de criar qualquer backup, confirme que o arquivo foi salvo antes de avançar o checkpoint incremental; sem essa confirmação, as alterações continuam incluídas no próximo backup.
 
 ## Limites conhecidos das versões 1.5.x
@@ -51,7 +48,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.5.3.md` para as mudanças mais recentes e os changelogs anteriores para o histórico de versões.
+Consulte `CHANGELOG_v1.6.0.md` para as mudanças mais recentes e os changelogs anteriores para o histórico de versões.
 
 ## Estrutura do projeto
 
@@ -79,6 +76,7 @@ CHANGELOG_v1.4.0.md
 CHANGELOG_v1.5.0.md
 CHANGELOG_v1.5.1.md
 CHANGELOG_v1.5.2.md
+CHANGELOG_v1.6.0.md
 CHANGELOG_v1.5.3.md
 README.md
 ```
@@ -174,3 +172,15 @@ A barra inferior voltou a exibir ícones próprios para as seis áreas. O indica
 - As respostas, grifos, marcações de revisão e alternativas eliminadas continuam vinculadas à atividade salva.
 - A exclusão de questões de um pacote agora também atualiza atividades pausadas.
 - Nenhuma mudança estrutural no IndexedDB; a nova versão preserva os dados locais existentes. O cache offline foi atualizado para 1.5.3.
+
+## v1.6.0
+
+- Resposta de alternativa pode ser limpa ao clicar novamente na opção selecionada.
+- Navegação da atividade mostra o número e, de forma discreta, a resposta; a grade se adapta ao total de questões.
+- Textos-base compartilhados são agrupados e exibidos uma única vez na atividade. Uma questão pode referenciar mais de um texto-base por `textBaseIds`, mantendo `textBaseId` para compatibilidade.
+- Geradores de atividades e tarefas de pacotes podem excluir questões com textos-base compartilhados.
+- Tarefas criadas a partir de pacotes recebem configurações completas de correção, comentários, navegação, cronômetro e pontuação negativa.
+- Leitura no computador ampliada, tipografia de prova, comando de questão destacado quando identificado com segurança e links compactos.
+- Normalização automática de espaçamentos e quebras em textos importados; os campos de revisão permitem usar a verificação ortográfica do navegador.
+- Importação e exportação de pacote completo em um único ZIP, com JSON e imagens; o formato anterior continua aceito.
+- Nenhuma migração destrutiva do IndexedDB. Dados e atividades já existentes são preservados. Cache offline atualizado para 1.6.0.
