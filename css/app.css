@@ -639,7 +639,7 @@ input:not([type=checkbox]):not([type=radio]), select, textarea { padding: 8px 9p
 }
 
 
-/* Grafia Questions 1.6.0 — desktop reading, shared source texts and compact controls */
+/* Grafia Questions 1.6.1 — desktop reading, shared source texts and compact controls */
 :root { --font-question: Arial, Helvetica, sans-serif; }
 .exam-shell { width: min(100%, 1580px); max-width: 1580px; margin: 0 auto; }
 .exam-layout { grid-template-columns: minmax(0, 1fr) minmax(175px, 218px); gap: clamp(16px, 2vw, 28px); }
