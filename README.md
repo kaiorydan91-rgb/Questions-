@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.6.0
+# Grafia Questions — versão 1.6.1
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -48,7 +48,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.6.0.md` para as mudanças mais recentes e os changelogs anteriores para o histórico de versões.
+Consulte `CHANGELOG_v1.6.1.md` para as correções mais recentes e os changelogs anteriores para o histórico de versões.
 
 ## Estrutura do projeto
 
@@ -76,6 +76,7 @@ CHANGELOG_v1.4.0.md
 CHANGELOG_v1.5.0.md
 CHANGELOG_v1.5.1.md
 CHANGELOG_v1.5.2.md
+CHANGELOG_v1.6.1.md
 CHANGELOG_v1.6.0.md
 CHANGELOG_v1.5.3.md
 README.md
@@ -172,6 +173,13 @@ A barra inferior voltou a exibir ícones próprios para as seis áreas. O indica
 - As respostas, grifos, marcações de revisão e alternativas eliminadas continuam vinculadas à atividade salva.
 - A exclusão de questões de um pacote agora também atualiza atividades pausadas.
 - Nenhuma mudança estrutural no IndexedDB; a nova versão preserva os dados locais existentes. O cache offline foi atualizado para 1.5.3.
+
+## v1.6.1
+
+- Corrigido o campo de data DOS dos arquivos ZIP gerados (1980-01-01 válido, em vez de uma data inválida).
+- Leitor ZIP reforçado: valida final do diretório central, discos, flags, campos ZIP64, nomes, cabeçalhos locais, descritores de dados, sobreposição de registros, tamanhos e CRC.
+- Mensagens de erro de importação mais específicas e fechamento garantido da conexão temporária do banco no Worker.
+- Cache offline atualizado para 1.6.1; sem migração destrutiva do IndexedDB.
 
 ## v1.6.0
 
