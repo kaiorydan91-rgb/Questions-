@@ -1,3 +1,7 @@
+# Grafia Questions — v1.6.3
+
+Atualização de interface desktop ampla, botão para deixar respostas em branco e correções acumuladas de importação.
+
 # Grafia Questions — versão 1.6.1
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
@@ -48,7 +52,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.6.1.md` para as correções mais recentes e os changelogs anteriores para o histórico de versões.
+Consulte `CHANGELOG_v1.6.2.md` para as correções mais recentes e os changelogs anteriores para o histórico de versões.
 
 ## Estrutura do projeto
 
@@ -77,6 +81,7 @@ CHANGELOG_v1.5.0.md
 CHANGELOG_v1.5.1.md
 CHANGELOG_v1.5.2.md
 CHANGELOG_v1.6.1.md
+CHANGELOG_v1.6.2.md
 CHANGELOG_v1.6.0.md
 CHANGELOG_v1.5.3.md
 README.md
@@ -192,3 +197,10 @@ A barra inferior voltou a exibir ícones próprios para as seis áreas. O indica
 - Normalização automática de espaçamentos e quebras em textos importados; os campos de revisão permitem usar a verificação ortográfica do navegador.
 - Importação e exportação de pacote completo em um único ZIP, com JSON e imagens; o formato anterior continua aceito.
 - Nenhuma migração destrutiva do IndexedDB. Dados e atividades já existentes são preservados. Cache offline atualizado para 1.6.0.
+
+
+## v1.6.2
+
+- Leitura alternativa de arquivos selecionados em navegadores móveis e nova tentativa automática fora do Worker.
+- Diagnóstico detalhado de ZIP incompleto ou sem EOCD.
+- Cache do Service Worker atualizado para v1.6.2.
