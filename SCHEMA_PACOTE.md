@@ -1,6 +1,6 @@
 # Formato de importação do Grafia Questions — schema 1.0.0
 
-A importação aceita um ZIP completo (recomendado), contendo o JSON e as imagens, ou o formato legado com JSON obrigatório e ZIP opcional de imagens. O banco inicial do aplicativo é vazio; este documento não contém questões de demonstração.
+A importação utiliza um arquivo JSON obrigatório e um ZIP opcional de imagens. O banco inicial do aplicativo é vazio; este documento não contém questões de demonstração.
 
 ## Arquivo de dados
 
@@ -39,7 +39,6 @@ Cada questão precisa de um `id` globalmente único e estável entre reimportaç
   "explanation": "Resolução geral, quando disponível.",
   "alternativeExplanations": {"A":"...", "C":"..."},
   "textBaseId": "TEXTO-001",
-  "textBaseIds": ["TEXTO-001", "TEXTO-002"],
   "images": [
     {
       "id": "IMG-BIO-001",
@@ -69,7 +68,7 @@ Esta versão não aceita questões discursivas. Se o material de origem contiver
 - `true_false`: uma afirmação; `answer` deve ser `V` ou `F`.
 - `assertion_set`: múltiplas afirmações; use `statements` como array de objetos `{ "id": "S1", "text": "..." }` e `answer` como sequência de `V` e `F`, por exemplo `"VFV"`.
 
-Questões ligadas a textos-base usam `textBaseId` (compatibilidade) ou `textBaseIds` (um ou mais textos). Quando o mesmo texto-base for referenciado por várias questões, a atividade o apresenta uma única vez e agrupa as questões relacionadas. Os textos-base ficam no array `textBases`, com `id`, `title`, `content` e `source` opcionais. Uma questão pode indicar assuntos secundários (`secondaryTopics`), subassuntos (`subtopics`), matérias relacionadas (`relatedSubjects`), pré-requisitos (`prerequisites`) e habilidades (`skills`). `classificationConfidence` é um número entre 0 e 1; `classificationNote` registra ressalvas ou justificativas da classificação. `sourceQuestionNumber` preserva a numeração original.
+Questões ligadas a textos-base usam `textBaseId`. Os textos-base ficam no array `textBases`, com `id`, `title`, `content` e `source` opcionais. Uma questão pode indicar assuntos secundários (`secondaryTopics`), subassuntos (`subtopics`), matérias relacionadas (`relatedSubjects`), pré-requisitos (`prerequisites`) e habilidades (`skills`). `classificationConfidence` é um número entre 0 e 1; `classificationNote` registra ressalvas ou justificativas da classificação. `sourceQuestionNumber` preserva a numeração original.
 
 ### Imagens
 
@@ -99,8 +98,9 @@ Matérias reconhecidas inicialmente: Português, Literatura, Inglês, Espanhol, 
 
 `triParameters` aceita `a` (discriminação), `b` (dificuldade) e `c` (acerto casual). A estimativa exibida pelo aplicativo é experimental, requer pelo menos cinco itens respondidos com parâmetros válidos e não representa a TRI oficial do ENEM. Não invente parâmetros: omita o objeto quando não houver calibração empírica confiável.
 
-## Pacote completo em um ZIP
+## Dois arquivos por importação
 
-O formato recomendado é um único arquivo ZIP contendo exatamente um JSON de dados e as imagens referenciadas em `images[].file`, por exemplo `grafia-package.json` e `imagens/IMG-001.webp`. O importador localiza o JSON e associa os arquivos pelo caminho.
+1. `pacote-questoes.json` — obrigatório, contém dados e referências.
+2. `pacote-imagens.zip` — opcional, contém as imagens citadas em `images[].file`.
 
-O formato antigo com `pacote-questoes.json` e `pacote-imagens.zip` continua funcionando para compatibilidade. Não incorpore imagens em base64 dentro do JSON.
+Não incorpore imagens em base64 dentro do JSON. Isso mantém os lotes pequenos e permite que os recursos sejam compartilhados sem duplicar arquivos.
