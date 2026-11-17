@@ -22,6 +22,8 @@ let textBaseByIdMap = new Map();
 let answerMapSource = null;
 let answerByIdMap = new Map();
 let assetImageObserver = null;
+let activityNavigationFrame = 0;
+let activityNavigationObserver = null;
 const assetLoadPromises = new Map();
 const questionSearchCache = new WeakMap();
 const SUBJECTS = {
@@ -74,6 +76,82 @@ function linkifyText(value) {
 }
 function richText(value) {
   return linkifyText(value).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>').replace(/\n/g, '<br>');
+}
+/**
+ * Apresenta textos compartilhados extensos com numeração em uma coluna própria.
+ * A estrutura do DOM conserva os caracteres originais (inclusive prefixos e
+ * quebras de linha ocultos), para que os offsets de grifos continuem válidos.
+ */
+function renderSharedTextContent(value) {
+  const source = String(value ?? '');
+  if (!source) return '';
+  const chunks = source.split(/(\r\n|\n|\r)/);
+  const rows = [];
+  for (let index = 0; index < chunks.length; index += 2) {
+    rows.push({ text: chunks[index] ?? '', separator: chunks[index + 1] ?? '' });
+  }
+  const prefixPattern = /^(\s*\d{1,3}(?:[.)])?\s+)(\S.*)$/u;
+  const matches = rows.map(row => row.text.match(prefixPattern));
+  const markerIndices = matches.map((match, index) => match ? index : -1).filter(index => index >= 0);
+  const firstNumbered = markerIndices[0] ?? -1;
+  const nonEmptyAfter = firstNumbered >= 0
+    ? rows.slice(firstNumbered).filter(row => row.text.trim())
+    : [];
+  const numberedAfter = firstNumbered >= 0
+    ? matches.slice(firstNumbered).filter(Boolean).length
+    : 0;
+  const explicitNumbering = numberedAfter >= 3 && numberedAfter / Math.max(1, nonEmptyAfter.length) >= 0.62;
+  const titlePreambleIndex = rows[0]?.text.trim() && rows[0].text.trim().length <= 100 && !rows[1]?.text.trim()
+    ? 0 : -1;
+  // Algumas provas imprimem o número somente a cada cinco linhas (5, 10, 15...).
+  // Quando os saltos numéricos coincidem com a quantidade de linhas entre marcadores,
+  // completamos visualmente a numeração intermediária sem modificar o texto original.
+  const sparseNumbering = !explicitNumbering && markerIndices.length >= 2 && markerIndices.slice(1).every((index, position) => {
+    const previousIndex = markerIndices[position];
+    const previousNumber = Number(rows[previousIndex].text.match(/^\s*(\d{1,3})/)?.[1]);
+    const currentNumber = Number(rows[index].text.match(/^\s*(\d{1,3})/)?.[1]);
+    const rowCount = rows.slice(previousIndex + 1, index + 1).filter(row => row.text.trim()).length;
+    return Number.isFinite(previousNumber) && Number.isFinite(currentNumber) && currentNumber > previousNumber && currentNumber - previousNumber === rowCount;
+  });
+  const recognizedNumbering = explicitNumbering || sparseNumbering;
+  const nonEmptyCount = rows.filter(row => row.text.trim()).length;
+  const longMultiline = source.length >= 320 && nonEmptyCount >= 4 && rows.length >= 5;
+  if (!recognizedNumbering && !longMultiline) return richText(source);
+
+  const html = [];
+  let nextLineNumber = 1;
+  const automaticPreambleIndex = !recognizedNumbering ? titlePreambleIndex : -1;
+  if (explicitNumbering) {
+    nextLineNumber = Number(rows[firstNumbered].text.match(/^\s*(\d{1,3})/)?.[1]) || 1;
+  } else if (sparseNumbering) {
+    const contentStartIndex = titlePreambleIndex === 0 ? 2 : 0;
+    const precedingContentRows = rows.slice(contentStartIndex, firstNumbered).filter(row => row.text.trim()).length;
+    const firstMarkerNumber = Number(rows[firstNumbered].text.match(/^\s*(\d{1,3})/)?.[1]) || 1;
+    nextLineNumber = Math.max(1, firstMarkerNumber - precedingContentRows);
+  }
+  let automaticLineIndex = 0;
+  rows.forEach((row, index) => {
+    if (!row.text && !row.separator) return;
+    if (!row.text.trim()) {
+      html.push(`<div class="shared-text-line-gap" aria-hidden="true"><span class="shared-text-source-separator" aria-hidden="true">${escapeHTML(row.separator)}</span></div>`);
+      return;
+    }
+    if ((explicitNumbering && index < firstNumbered) || ((sparseNumbering || !recognizedNumbering) && index === titlePreambleIndex && titlePreambleIndex >= 0)) {
+      html.push(`<div class="shared-text-preamble">${richText(row.text)}<span class="shared-text-source-separator" aria-hidden="true">${escapeHTML(row.separator)}</span></div>`);
+      return;
+    }
+    const match = recognizedNumbering ? matches[index] : null;
+    const sourcePrefix = match?.[1] || '';
+    const lineContent = match ? match[2] : row.text;
+    const lineNumber = match
+      ? (row.text.match(/^\s*(\d{1,3})/)?.[1] || String(nextLineNumber))
+      : String(nextLineNumber + automaticLineIndex);
+    if (match) nextLineNumber = Number(lineNumber) + 1;
+    else if (recognizedNumbering) nextLineNumber += 1;
+    else automaticLineIndex += 1;
+    html.push(`<div class="shared-text-line" data-line-number="${safeAttr(lineNumber)}"><span class="shared-line-source-prefix" aria-hidden="true">${escapeHTML(sourcePrefix)}</span><span class="shared-line-content">${richText(lineContent)}</span><span class="shared-text-source-separator" aria-hidden="true">${escapeHTML(row.separator)}</span></div>`);
+  });
+  return `<div class="shared-numbered-text" data-numbered-lines="true">${html.join('')}</div>`;
 }
 function renderExternalReference(url, label = 'Abrir referência') {
   const href = normalizeWebUrl(url);
@@ -810,7 +888,7 @@ async function renderSession() {
     }).join('');
     const sharedAssociation = sharedLabels.length && sharedTextRendered ? `<div class="shared-text-reference">Texto(s) de apoio apresentado(s) no início do conjunto: ${sharedLabels.map(escapeHTML).join(' · ')}</div>` : '';
     const navLabel = responseNavigationLabel(q, answer);
-    return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${escapeHTML(questionDisplayNumber(q, index))}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${q.explanation || Object.keys(q.alternativeExplanations || {}).length ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${individualBasesHtml}${sharedAssociation}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}${renderQuestionStem(q.statement, q.id)}${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, activity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
+    return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${escapeHTML(questionDisplayNumber(q, index))}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${q.explanation || Object.keys(q.alternativeExplanations || {}).length ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${individualBasesHtml}${sharedAssociation}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}${renderQuestionStem(q.statement, q.id)}${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, activity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label>${answer?.response ? `<button type="button" class="text-button clear-answer-button" data-action="clear-question-answer" data-id="${safeAttr(q.id)}">Limpar resposta</button>` : ''}<span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
   };
   let questionMarkup = '';
   const consumed = new Set();
@@ -849,18 +927,20 @@ async function renderSession() {
       const sourceQuestion = groupQuestions.find(q => questionTextBaseIds(q).includes(textId));
       const marks = groupQuestions.flatMap(q => (state.activityAnswers.get(q.id)?.highlights || []).filter(mark => (mark.target || 'statement') === 'textBase' && (!mark.textBaseId || mark.textBaseId === textId)));
       const mergedMarks = [...new Map(marks.map(mark => [`${mark.start}:${mark.end}`, mark])).values()];
-      return `<section class="shared-text-panel" id="shared-text-${safeAttr(textId)}"><div class="shared-text-heading"><div><span>TEXTO COMPARTILHADO · ${escapeHTML(labels)}</span><h3>${escapeHTML(base.title || 'Texto-base')}</h3></div><span class="shared-once-tag">Exibido uma vez</span></div><div class="base-content shared-base-content" data-textbase-for="${safeAttr(sourceQuestion?.id || '')}" data-question-id="${safeAttr(sourceQuestion?.id || '')}" data-textbase-id="${safeAttr(textId)}">${richText(base.content)}</div></section>`;
+      return `<section class="shared-text-panel" id="shared-text-${safeAttr(textId)}" data-current-question-id="${safeAttr(sourceQuestion?.id || groupQuestions[0]?.id || '')}"><div class="shared-text-heading"><div><span>TEXTO COMPARTILHADO · ${escapeHTML(labels)}</span><h3>${escapeHTML(base.title || 'Texto-base')}</h3></div><span class="shared-once-tag">Exibido uma vez</span></div><div class="base-content shared-base-content" data-textbase-for="${safeAttr(sourceQuestion?.id || '')}" data-question-id="${safeAttr(sourceQuestion?.id || '')}" data-textbase-id="${safeAttr(textId)}">${renderSharedTextContent(base.content)}</div></section>`;
     }).join('');
     questionMarkup += `<section class="shared-text-group">${textBlocks}<div class="shared-question-list">${groupQuestions.map(q => renderQuestionCard(q, indexById.get(q.id), true)).join('')}</div></section>`;
   }
-  const gridColumns = Math.max(4, Math.min(10, Math.ceil(Math.sqrt(questions.length))));
+  const gridColumns = 5;
   const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${questions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${questions.length ? answered / questions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${questionMarkup}</div><aside class="glass-card exam-side"><div class="exam-side-heading"><h3>Navegação</h3><span>${questions.length}</span></div><div class="exam-number-grid" style="--exam-nav-columns:${gridColumns}">${questions.map((q,index) => { const label = responseNavigationLabel(q, state.activityAnswers.get(q.id)); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index+1}${label ? `, resposta ${label}` : ', em branco'}"><span>${index + 1}</span>${label ? `<small>${escapeHTML(label)}</small>` : ''}</button>`; }).join('')}</div><button class="button secondary" data-action="clear-activity-answers" title="Desmarcar as alternativas desta atividade">Deixar tudo em branco</button><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('#activitySession').innerHTML = html;
   $('.activity-layout').classList.add('hidden');
   $('#activityNoQuestions').classList.add('hidden');
   $('#activitySession').classList.remove('hidden');
+  refreshActivityNavigationObserver();
   await hydrateAssetImages($('#activitySession'));
+  scheduleActivityNavigationSync();
   for (const question of questions) {
     const marks = state.activityAnswers.get(question.id)?.highlights || [];
     applyTextMarks($(`[data-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement');
@@ -873,6 +953,69 @@ async function renderSession() {
   }
   if (activity.config.timerEnabled) updateTimerLabel();
 }
+function refreshActivityNavigationObserver() {
+  if (!('IntersectionObserver' in window)) return;
+  activityNavigationObserver?.disconnect();
+  activityNavigationObserver = new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting || entry.intersectionRatio === 0)) {
+      scheduleActivityNavigationSync();
+    }
+  }, { root: null, threshold: 0 });
+  $$('[data-question-card], .shared-text-panel[data-current-question-id]').forEach(element => activityNavigationObserver.observe(element));
+}
+function keepActivityNavButtonVisible(questionId, behavior = 'smooth') {
+  const grid = $('.exam-number-grid');
+  const button = grid?.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
+  if (!grid || !button) return;
+  const gridRect = grid.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+  if (buttonRect.top < gridRect.top + 5) {
+    grid.scrollBy({ top: buttonRect.top - gridRect.top - 10, behavior });
+  } else if (buttonRect.bottom > gridRect.bottom - 5) {
+    grid.scrollBy({ top: buttonRect.bottom - gridRect.bottom + 10, behavior });
+  }
+}
+function setActiveActivityNavigation(questionId, scroll = true) {
+  if (!questionId) return;
+  const grid = $('.exam-number-grid');
+  const button = grid?.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
+  if (!button) return;
+  const changed = !button.classList.contains('current');
+  grid.querySelectorAll('.exam-number.current').forEach(item => item.classList.remove('current'));
+  button.classList.add('current');
+  if (scroll && changed) keepActivityNavButtonVisible(questionId);
+}
+function syncActivityNavigationWithReadingPosition() {
+  activityNavigationFrame = 0;
+  if (!state.currentActivity || state.currentActivity.status !== 'running' || state.page !== 'activity') return;
+  const markerY = Math.max(115, Math.min(window.innerHeight * 0.36, window.innerHeight - 150));
+  const targets = [
+    ...$$('[data-question-card]').map(element => ({ element, id: element.dataset.questionCard })),
+    ...$$('.shared-text-panel[data-current-question-id]').map(element => ({ element, id: element.dataset.currentQuestionId }))
+  ].filter(item => item.id);
+  if (!targets.length) return;
+  let current = targets.find(({ element }) => {
+    const rect = element.getBoundingClientRect();
+    return rect.top <= markerY && rect.bottom > markerY;
+  });
+  if (!current) {
+    current = targets
+      .map(item => ({ ...item, rect: item.element.getBoundingClientRect() }))
+      .filter(item => item.rect.bottom > 0 && item.rect.top < window.innerHeight)
+      .sort((a, b) => Math.abs(a.rect.top - markerY) - Math.abs(b.rect.top - markerY))[0];
+  }
+  if (current) setActiveActivityNavigation(current.id, true);
+}
+function scheduleActivityNavigationSync() {
+  if (activityNavigationFrame) cancelAnimationFrame(activityNavigationFrame);
+  activityNavigationFrame = requestAnimationFrame(syncActivityNavigationWithReadingPosition);
+}
+// Capture scroll events from the viewport and from any nested scrolling container.
+// Scroll events do not bubble, so capture=true is necessary for panels with their own overflow.
+document.addEventListener('scroll', scheduleActivityNavigationSync, { passive: true, capture: true });
+window.addEventListener('scroll', scheduleActivityNavigationSync, { passive: true });
+window.addEventListener('resize', scheduleActivityNavigationSync, { passive: true });
+
 async function saveQuestionResponse(questionId) {
   const question = questionById(questionId);
   if (!question || !state.currentActivity) return;
@@ -895,12 +1038,62 @@ async function saveQuestionResponse(questionId) {
   if (feedback) feedback.innerHTML = renderQuestionFeedback(question, record, state.currentActivity.config);
   const saved = $('#saved-' + CSS.escape(questionId));
   if (saved) saved.textContent = response ? (complete ? 'Resposta salva automaticamente' : 'Resposta parcial salva automaticamente') : 'Ainda não respondida';
+  const tools = card.querySelector('.question-tools');
+  let clearButton = tools?.querySelector('[data-action="clear-question-answer"]');
+  if (response && !clearButton && saved) {
+    clearButton = document.createElement('button');
+    clearButton.type = 'button';
+    clearButton.className = 'text-button clear-answer-button';
+    clearButton.dataset.action = 'clear-question-answer';
+    clearButton.dataset.id = questionId;
+    clearButton.textContent = 'Limpar resposta';
+    saved.before(clearButton);
+  } else if (!response) clearButton?.remove();
   const count = state.currentActivity.questionIds.reduce((total, id) => total + answerCount(id), 0);
   $('#examAnsweredCount').textContent = `${count} de ${state.currentActivity.questionIds.length} respondidas`;
   $('#examProgressBar').style.width = `${count / state.currentActivity.questionIds.length * 100}%`;
   const navButton = document.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
   if (navButton) { navButton.classList.toggle('answered', complete); navButton.innerHTML = `<span>${state.currentActivity.questionIds.indexOf(questionId) + 1}</span>${complete ? `<small>${escapeHTML(responseNavigationLabel(question, record))}</small>` : ''}`; navButton.setAttribute('aria-label', `Questão ${state.currentActivity.questionIds.indexOf(questionId) + 1}${complete ? `, resposta ${responseNavigationLabel(question, record)}` : ', em branco'}`); }
 }
+async function clearQuestionResponse(questionId) {
+  const activity = state.currentActivity;
+  const question = questionById(questionId);
+  if (!activity || activity.status !== 'running' || !question) return;
+  const previous = state.activityAnswers.get(questionId) || {
+    id: `${activity.id}::${questionId}`, activityId: activity.id, questionId, response: ''
+  };
+  if (!String(previous.response || '').trim()) return toast('Esta questão já está em branco.');
+  const record = {
+    ...previous,
+    response: '',
+    answeredAt: null,
+    isCorrect: null,
+    updatedAt: nowISO()
+  };
+  await putRecord(state.db, 'answers', record);
+  syncAnswerCache(record);
+  const options = $(`#options-q-${CSS.escape(questionId)}`);
+  if (options) options.outerHTML = renderResponseOptions(question, '', record, activity.config);
+  const feedback = $(`#feedback-${CSS.escape(questionId)}`);
+  if (feedback) feedback.innerHTML = '';
+  const saveStatus = $(`#saved-${CSS.escape(questionId)}`);
+  if (saveStatus) saveStatus.textContent = 'Ainda não respondida';
+  const clearButton = document.querySelector(`[data-action="clear-question-answer"][data-id="${CSS.escape(questionId)}"]`);
+  clearButton?.remove();
+  const count = activity.questionIds.reduce((total, id) => total + answerCount(id), 0);
+  const countLabel = $('#examAnsweredCount');
+  if (countLabel) countLabel.textContent = `${count} de ${activity.questionIds.length} respondidas`;
+  const progress = $('#examProgressBar');
+  if (progress) progress.style.width = `${count / activity.questionIds.length * 100}%`;
+  const navButton = document.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
+  if (navButton) {
+    navButton.classList.remove('answered');
+    navButton.innerHTML = `<span>${activity.questionIds.indexOf(questionId) + 1}</span>`;
+    navButton.setAttribute('aria-label', `Questão ${activity.questionIds.indexOf(questionId) + 1}, em branco`);
+  }
+  toast('Resposta removida. Você pode selecionar outra alternativa.');
+}
+
 async function setConfidence(questionId, confidence) {
   const old = state.activityAnswers.get(questionId) || { id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id, questionId, response: '' };
   const next = { ...old, confidence, updatedAt: nowISO() };
@@ -1011,7 +1204,7 @@ async function renderResult(activity) {
   const result = activity.result || {};
   const resultUsage = textBaseUsageMap(questions.map(question => question.id));
   const resultSharedIds = new Set([...resultUsage].filter(([, ids]) => ids.length > 1).map(([id]) => id));
-  const resultSharedTexts = [...resultSharedIds].map(id => { const base = textBaseById(id); if (!base) return ''; const related = (resultUsage.get(id) || []).map(questionId => { const index = questions.findIndex(q => q.id === questionId); return `Q${questionDisplayNumber(questionById(questionId), Math.max(0, index))}`; }).join(' · '); return `<section class="shared-text-panel result-shared-text"><div class="shared-text-heading"><div><span>TEXTO COMPARTILHADO · ${escapeHTML(related)}</span><h3>${escapeHTML(base.title || 'Texto-base')}</h3></div><span class="shared-once-tag">Exibido uma vez</span></div><div class="base-content shared-base-content" data-result-shared-textbase="${safeAttr(id)}">${richText(base.content)}</div></section>`; }).join('');
+  const resultSharedTexts = [...resultSharedIds].map(id => { const base = textBaseById(id); if (!base) return ''; const related = (resultUsage.get(id) || []).map(questionId => { const index = questions.findIndex(q => q.id === questionId); return `Q${questionDisplayNumber(questionById(questionId), Math.max(0, index))}`; }).join(' · '); return `<section class="shared-text-panel result-shared-text"><div class="shared-text-heading"><div><span>TEXTO COMPARTILHADO · ${escapeHTML(related)}</span><h3>${escapeHTML(base.title || 'Texto-base')}</h3></div><span class="shared-once-tag">Exibido uma vez</span></div><div class="base-content shared-base-content" data-result-shared-textbase="${safeAttr(id)}">${renderSharedTextContent(base.content)}</div></section>`; }).join('');
   const activityRecords = activityPerformanceRecords(activity);
   const renderResultBreakdown = keyGetter => {
     const map = new Map();
@@ -2350,7 +2543,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.6.3');
+  await setSetting(state.db, 'appVersion', '1.6.4');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2406,11 +2599,11 @@ async function clearCurrentActivityAnswers() {
   const activity = state.currentActivity;
   if (!activity || activity.status !== 'running') return toast('Não há atividade em andamento para limpar.');
   const related = state.data.answers.filter(item => item.activityId === activity.id);
-  const toClear = related.filter(item => String(item.response || '').trim() || (item.dimmedOptions || item.eliminatedOptions || []).length);
+  const toClear = related.filter(item => String(item.response || '').trim() || item.answeredAt || item.isCorrect != null || (item.dimmedOptions || item.eliminatedOptions || []).length);
   if (!toClear.length) return toast('Todas as questões já estão em branco.');
   if (!confirm(`Deixar todas as ${activity.questionIds.length} questões em branco?\n\n${toClear.length} respostas e marcações de alternativas serão removidas desta atividade. Grifos, confiança e sinalizações de revisão serão preservados.`)) return;
   for (const old of toClear) {
-    const updated = { ...old, response: '', dimmedOptions: [], eliminatedOptions: undefined, updatedAt: nowISO() };
+    const updated = { ...old, response: '', answeredAt: null, isCorrect: null, dimmedOptions: [], eliminatedOptions: undefined, updatedAt: nowISO() };
     await putRecord(state.db, 'answers', updated);
     syncAnswerCache(updated);
   }
@@ -2467,6 +2660,25 @@ function hideTextSelectionToolbar() {
   if (toolbar) toolbar.classList.add('hidden');
   pendingTextSelection = null;
 }
+function textOffsetAtBoundary(root, container, offset) {
+  if (container?.nodeType === Node.TEXT_NODE) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let total = 0;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node === container) return total + Math.max(0, Math.min(offset, node.nodeValue.length));
+      total += node.nodeValue.length;
+    }
+    return null;
+  }
+  // Selection boundaries are normally text nodes; keep a safe fallback for element boundaries.
+  try {
+    const prefix = document.createRange();
+    prefix.selectNodeContents(root);
+    prefix.setEnd(container, offset);
+    return prefix.toString().length;
+  } catch { return null; }
+}
 function updateTextSelectionToolbar() {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || !selection.rangeCount || !state.currentActivity || state.currentActivity.status !== 'running') return hideTextSelectionToolbar();
@@ -2476,15 +2688,9 @@ function updateTextSelectionToolbar() {
   if (!root || !root.contains(range.startContainer) || !root.contains(range.endContainer)) return hideTextSelectionToolbar();
   const selectedText = selection.toString().trim();
   if (!selectedText) return hideTextSelectionToolbar();
-  const prefix = range.cloneRange();
-  prefix.selectNodeContents(root);
-  prefix.setEnd(range.startContainer, range.startOffset);
-  const throughEnd = range.cloneRange();
-  throughEnd.selectNodeContents(root);
-  throughEnd.setEnd(range.endContainer, range.endOffset);
-  const start = prefix.toString().length;
-  const end = throughEnd.toString().length;
-  if (end <= start) return hideTextSelectionToolbar();
+  const start = textOffsetAtBoundary(root, range.startContainer, range.startOffset);
+  const end = textOffsetAtBoundary(root, range.endContainer, range.endOffset);
+  if (start == null || end == null || end <= start) return hideTextSelectionToolbar();
   const card = root.closest('[data-question-card]');
   const questionId = root.dataset.questionId || card?.dataset.questionCard;
   if (!questionId) return hideTextSelectionToolbar();
@@ -2524,7 +2730,7 @@ async function toggleTextHighlight() {
   }
   const selector = target === 'textBase' ? `[data-textbase-id="${CSS.escape(selected.textBaseId)}"]` : `[data-statement-for="${CSS.escape(selected.questionId)}"]`;
   const root = $(selector);
-  if (root) { const nextMarks = affectedQuestions.flatMap(item => (state.activityAnswers.get(item.id)?.highlights || []).filter(mark => (mark.target || 'statement') === target && (!selected.textBaseId || !mark.textBaseId || mark.textBaseId === selected.textBaseId))); root.innerHTML = richText(target === 'textBase' ? (textBaseById(selected.textBaseId || question.textBaseId)?.content || '') : question.statement); applyTextMarks(root, [...new Map(nextMarks.map(mark => [`${mark.start}:${mark.end}`, mark])).values()], target); }
+  if (root) { const nextMarks = affectedQuestions.flatMap(item => (state.activityAnswers.get(item.id)?.highlights || []).filter(mark => (mark.target || 'statement') === target && (!selected.textBaseId || !mark.textBaseId || mark.textBaseId === selected.textBaseId))); root.innerHTML = target === 'textBase' ? renderSharedTextContent(textBaseById(selected.textBaseId || question.textBaseId)?.content || '') : richText(question.statement); applyTextMarks(root, [...new Map(nextMarks.map(mark => [`${mark.start}:${mark.end}`, mark])).values()], target); }
   hideTextSelectionToolbar();
   window.getSelection()?.removeAllRanges();
 }
@@ -2542,16 +2748,7 @@ async function toggleDimmedOption(questionId, option) {
   if (container && question) container.outerHTML = renderResponseOptions(question, next.response || '', next, state.currentActivity.config);
 }
 
-// Clicking an already selected radio clears the answer, making questions truly blank again.
-document.addEventListener('click', event => {
-  const radio = event.target.closest?.('input[type="radio"][name^="answer-"]') || event.target.closest?.('.answer-option')?.querySelector('input[type="radio"][name^="answer-"]');
-  if (!radio || !radio.checked || !state.currentActivity || state.currentActivity.status !== 'running') return;
-  const card = radio.closest('[data-question-card]');
-  if (!card) return;
-  event.preventDefault();
-  radio.checked = false;
-  saveQuestionResponse(card.dataset.questionCard).catch(error => { console.error(error); toast('Não foi possível limpar a resposta.'); });
-}, true);
+// A resposta é removida pelo botão explícito "Limpar resposta"; radios usam o comportamento nativo.
 
 // Event delegation keeps the interface small and allows pages to be redrawn safely.
 document.addEventListener('click', async event => {
@@ -2583,6 +2780,7 @@ document.addEventListener('click', async event => {
       const previous = ids.slice(0,targetIndex).find(id=>!answerCount(id));
       if (previous) return toast('Responda às questões anteriores para seguir a navegação sequencial.');
     }
+    setActiveActivityNavigation(jump.dataset.jump, true);
     document.getElementById(`exam-q-${CSS.escape(jump.dataset.jump)}`)?.scrollIntoView({behavior:'smooth',block:'start'}); return;
   }
   const reviewFilter = event.target.closest('[data-review-filter]');
@@ -2644,6 +2842,7 @@ document.addEventListener('click', async event => {
     else if (action === 'save-question-edit') await saveQuestionEdit(actionButton.dataset.id);
     else if (action === 'finish-activity') await finishActivity(false);
     else if (action === 'clear-activity-answers') await clearCurrentActivityAnswers();
+    else if (action === 'clear-question-answer') await clearQuestionResponse(actionButton.dataset.id);
     else if (action === 'discard-activity') await discardCurrentActivity();
     else if (action === 'resume-activity') await resumeSavedActivity(actionButton.dataset.id);
     else if (action === 'delete-saved-activity') await deleteSavedActivity(actionButton.dataset.id);
