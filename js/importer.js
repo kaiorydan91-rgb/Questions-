@@ -81,7 +81,6 @@ function normalizeQuestion(raw, packageMeta = {}) {
     tables: Array.isArray(raw.tables ?? raw.tabelas) ? (raw.tables ?? raw.tabelas).map(table => ({ title: str(table.title ?? table.titulo), caption: str(table.caption ?? table.legenda), headers: Array.isArray(table.headers ?? table.cabecalho) ? (table.headers ?? table.cabecalho).map(str) : [], rows: Array.isArray(table.rows ?? table.linhas) ? (table.rows ?? table.linhas).map(row => Array.isArray(row) ? row.map(str) : []) : [], position: str(table.position ?? table.posicao) || 'after_statement' })) : [],
     equations: Array.isArray(raw.equations ?? raw.formulas) ? (raw.equations ?? raw.formulas).map(item => ({ label: str(item.label ?? item.rotulo), expression: str(item.expression ?? item.latex ?? item.formula ?? item.expressao), position: str(item.position ?? item.posicao) || 'after_statement' })) : [],
     textBaseId: str(raw.textBaseId ?? raw.text_base_id ?? raw.textoBaseId),
-    textBaseIds: [...new Set([...(Array.isArray(raw.textBaseIds ?? raw.text_base_ids ?? raw.textosBaseIds) ? (raw.textBaseIds ?? raw.text_base_ids ?? raw.textosBaseIds).map(str) : []), str(raw.textBaseId ?? raw.text_base_id ?? raw.textoBaseId)].filter(Boolean))],
     images,
     links: toArray(raw.links ?? raw.references ?? raw.referencias).map(item => typeof item === 'string' ? item : ({ url: str(item?.url ?? item?.href ?? item?.link), label: str(item?.label ?? item?.title ?? item?.name) })).filter(item => typeof item === 'string' ? item : item.url),
     sourceUrl: str(raw.sourceUrl ?? raw.sourceURL ?? raw.sourceLink ?? raw.referenceUrl),
@@ -99,7 +98,7 @@ function questionSignature(question) {
   const opts = Object.entries(question.alternatives || {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${normalizeSearch(v)}`).join('|');
   const images = (question.images || []).map(image => image.assetId).sort().join('|');
   const statements = (question.statements || []).map(item => normalizeSearch(item.text)).join('|');
-  return `${question.type}::${normalizeSearch(question.statement)}::${opts}::${statements}::${normalizeSearch([question.textBaseId, ...(question.textBaseIds || [])].join('|'))}::${images}`;
+  return `${question.type}::${normalizeSearch(question.statement)}::${opts}::${statements}::${normalizeSearch(question.textBaseId)}::${images}`;
 }
 
 function questionCoreSignature(question) {
@@ -114,7 +113,7 @@ function countQuestionInformation(question) {
     const value = question[field];
     return value !== null && value !== undefined && String(value).trim() !== '';
   }).length;
-  for (const field of ['secondaryTopics', 'relatedSubjects', 'subtopics', 'prerequisites', 'skills', 'errorCategories', 'statements', 'images', 'tables', 'equations', 'links', 'textBaseIds']) {
+  for (const field of ['secondaryTopics', 'relatedSubjects', 'subtopics', 'prerequisites', 'skills', 'errorCategories', 'statements', 'images', 'tables', 'equations', 'links']) {
     count += Array.isArray(question[field]) ? question[field].length : 0;
   }
   count += Object.keys(question.alternatives || {}).length;
@@ -173,8 +172,7 @@ function validateQuestion(question, index, textBaseIds, assetMap, invalidAssetId
     if (!/^[VF]+$/i.test(expected) || expected.length !== question.statements.length) issues.push('O gabarito das afirmações precisa informar V/F para cada afirmação.');
   }
   if (question.type === 'true_false' && !['V','F','TRUE','FALSE','VERDADEIRO','FALSO'].includes(String(question.answer).toUpperCase())) issues.push('O gabarito de verdadeiro ou falso precisa ser V ou F.');
-  const referencedTextBaseIds = [...new Set([question.textBaseId, ...(question.textBaseIds || [])].filter(Boolean))];
-  for (const textBaseId of referencedTextBaseIds) if (!textBaseIds.has(textBaseId)) issues.push(`Texto-base ${textBaseId} não encontrado no pacote.`);
+  if (question.textBaseId && !textBaseIds.has(question.textBaseId)) issues.push(`Texto-base ${question.textBaseId} não encontrado no pacote.`);
   for (const image of question.images) {
     if (invalidAssetIds.has(image.assetId)) issues.push(`O arquivo vinculado à imagem ${image.assetId} não é uma imagem compatível ou está corrompido.`);
     else if (!image.fileName && !assetMap.has(image.assetId)) issues.push(`A imagem ${image.assetId} não possui arquivo identificado.`);
@@ -200,148 +198,7 @@ function findAssetFile(files, ref) {
   return null;
 }
 
-function normalizeImportedText(value) {
-  const original = str(value);
-  if (!original) return '';
-  return original
-    .replace(/\u00A0/g, ' ')
-    .replace(/\r\n?/g, '\n')
-    .replace(/[\t ]{2,}/g, ' ')
-    .replace(/[ \t]+([,.;:!?%])/g, '$1')
-    .replace(/([([{])[ \t]+/g, '$1')
-    .replace(/[ \t]+([)\]}])/g, '$1')
-    .replace(/\n[ \t]+/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function countTextSpacingAdjustments(raw) {
-  let count = 0;
-  const check = value => { if (typeof value === 'string' && normalizeImportedText(value) !== value.trim()) count++; };
-  check(raw.statement ?? raw.enunciado); check(raw.explanation ?? raw.resolution ?? raw.resolucao);
-  const alternatives = raw.alternatives ?? raw.options ?? raw.alternativas;
-  if (alternatives && typeof alternatives === 'object') Object.values(alternatives).forEach(value => check(typeof value === 'string' ? value : value?.text));
-  for (const item of (raw.statements ?? raw.assertions ?? raw.afirmacoes ?? [])) check(typeof item === 'string' ? item : item?.text);
-  const comments = raw.alternativeExplanations ?? raw.explanationsByAlternative ?? raw.comentariosAlternativas;
-  if (comments && typeof comments === 'object') Object.values(comments).forEach(check);
-  return count;
-}
-
-function normalizeQuestionText(question) {
-  question.statement = normalizeImportedText(question.statement);
-  question.explanation = normalizeImportedText(question.explanation);
-  question.alternatives = Object.fromEntries(Object.entries(question.alternatives || {}).map(([key, value]) => [key, normalizeImportedText(value)]));
-  question.statements = (question.statements || []).map(item => ({ ...item, text: normalizeImportedText(item.text) }));
-  question.alternativeExplanations = Object.fromEntries(Object.entries(question.alternativeExplanations || {}).map(([key, value]) => [key, normalizeImportedText(value)]));
-  question.tables = (question.tables || []).map(table => ({ ...table, title: normalizeImportedText(table.title), caption: normalizeImportedText(table.caption), headers: (table.headers || []).map(normalizeImportedText), rows: (table.rows || []).map(row => row.map(normalizeImportedText)) }));
-  question.equations = (question.equations || []).map(item => ({ ...item, label: normalizeImportedText(item.label), expression: normalizeImportedText(item.expression) }));
-  question.images = (question.images || []).map(item => ({ ...item, alt: normalizeImportedText(item.alt), caption: normalizeImportedText(item.caption) }));
-  return question;
-}
-
-// Conservatively detects a long, exact text block repeated at the beginning of
-// multiple question statements. Short/common instructions are deliberately not
-// split, reducing the chance of treating repeated boilerplate as a source text.
-function sharedPrefixAtLineBoundary(left, right) {
-  const limit = Math.min(left.length, right.length);
-  let index = 0;
-  while (index < limit && left[index] === right[index]) index++;
-  const boundary = left.lastIndexOf('\n', index - 1);
-  if (boundary < 0) return '';
-  return left.slice(0, boundary).trim();
-}
-
-function textHash(value) {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
-function inferSharedTextBases(questions, existingQuestions = [], existingTextBases = [], reservedTextBaseIds = new Set()) {
-  const existingQuestionMap = new Map(existingQuestions.map(question => [question.id, question]));
-  const candidates = questions.filter(question =>
-    !question.textBaseId &&
-    !(question.textBaseIds || []).length &&
-    typeof question.statement === 'string' && question.statement.length >= 450
-  );
-  const links = new Map(candidates.map(question => [question.id, new Set()]));
-  for (let i = 0; i < candidates.length; i++) {
-    for (let j = i + 1; j < candidates.length; j++) {
-      const prefix = sharedPrefixAtLineBoundary(candidates[i].statement, candidates[j].statement);
-      const lineCount = prefix.split('\n').filter(line => line.trim()).length;
-      if (prefix.length >= 400 && lineCount >= 8) {
-        links.get(candidates[i].id).add(candidates[j].id);
-        links.get(candidates[j].id).add(candidates[i].id);
-      }
-    }
-  }
-  const byId = new Map(candidates.map(question => [question.id, question]));
-  const visited = new Set();
-  const inferred = [];
-  for (const candidate of candidates) {
-    if (visited.has(candidate.id) || !links.get(candidate.id)?.size) continue;
-    const stack = [candidate.id];
-    const group = [];
-    while (stack.length) {
-      const id = stack.pop();
-      if (visited.has(id)) continue;
-      visited.add(id); group.push(byId.get(id));
-      for (const linkedId of links.get(id) || []) if (!visited.has(linkedId)) stack.push(linkedId);
-    }
-    if (group.length < 2) continue;
-    let common = group[0].statement;
-    for (const question of group.slice(1)) {
-      let index = 0;
-      const limit = Math.min(common.length, question.statement.length);
-      while (index < limit && common[index] === question.statement[index]) index++;
-      common = common.slice(0, index);
-    }
-    const boundary = common.lastIndexOf('\n');
-    if (boundary < 0) continue;
-    const sharedContent = common.slice(0, boundary).trim();
-    if (sharedContent.length < 400 || sharedContent.split('\n').filter(line => line.trim()).length < 8) continue;
-    const suffixes = group.map(question => question.statement.slice(sharedContent.length).replace(/^\s+/, '').trim());
-    if (suffixes.some(suffix => suffix.length < 12)) continue;
-    // Do not rewrite a question that already exists in the bank if its stored
-    // statement still contains the repeated source text. This keeps reimports
-    // of older package revisions compatible and avoids false duplicate errors.
-    if (group.some((question, index) => {
-      const existing = existingQuestionMap.get(question.id);
-      return existing && normalizeImportedText(existing.statement) !== normalizeImportedText(suffixes[index]);
-    })) continue;
-    const linkedExistingIds = new Set(group.flatMap(question => {
-      const existing = existingQuestionMap.get(question.id);
-      return existing ? [existing.textBaseId, ...(existing.textBaseIds || [])].filter(Boolean) : [];
-    }));
-    const matchingExistingBase = existingTextBases.find(item => linkedExistingIds.has(item.id) && normalizeImportedText(item.content) === sharedContent)
-      || existingTextBases.find(item => normalizeImportedText(item.content) === sharedContent);
-    let textBaseId = matchingExistingBase?.id || `auto-text-${textHash(sharedContent)}`;
-    let suffix = 2;
-    while (!matchingExistingBase && reservedTextBaseIds.has(textBaseId)) textBaseId = `auto-text-${textHash(sharedContent)}-${suffix++}`;
-    reservedTextBaseIds.add(textBaseId);
-    inferred.push({ id: textBaseId, title: matchingExistingBase?.title || 'Texto-base identificado automaticamente', content: sharedContent, source: matchingExistingBase?.source || { type: 'automatic-shared-text-detection', questionIds: group.map(question => question.id) } });
-    group.forEach((question, index) => {
-      question.textBaseId = textBaseId;
-      question.textBaseIds = [...new Set([...(question.textBaseIds || []), textBaseId])];
-      question.statement = normalizeImportedText(suffixes[index]);
-    });
-  }
-  return inferred;
-}
-
 export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
-  let embeddedZipFiles = null;
-  if (!zipFile && /\.zip$/i.test(String(jsonFile?.name || ''))) {
-    embeddedZipFiles = await readZip(jsonFile);
-    const jsonCandidates = [...embeddedZipFiles.keys()].filter(path => /\.json$/i.test(path) && !path.split('/').some(part => part.startsWith('.')));
-    if (jsonCandidates.length !== 1) throw new Error(`O ZIP completo precisa conter exatamente um arquivo JSON de dados. Foram encontrados ${jsonCandidates.length}.`);
-    const manifestPath = jsonCandidates[0];
-    const manifestBlob = embeddedZipFiles.get(manifestPath);
-    const manifestFile = new File([manifestBlob], manifestPath.split('/').pop(), { type: 'application/json' });
-    embeddedZipFiles.delete(manifestPath);
-    jsonFile = manifestFile;
-  }
   if (Number(jsonFile?.size || 0) > 100 * 1024 * 1024) throw new Error('O JSON ultrapassa o limite de 100 MB. Divida o pacote em lotes menores.');
   const rawText = await jsonFile.text();
   let pkg;
@@ -380,26 +237,20 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     const type = str(unsupported.type ?? unsupported.questionType ?? unsupported.tipo);
     throw new Error(`O pacote contém o tipo de questão "${type}" (ID ${str(unsupported.id) || 'sem ID'}), que não é aceito nesta versão. Questões discursivas não são convertidas automaticamente.`);
   }
-  const questionTextAdjustments = pkg.questions.reduce((total, raw) => total + countTextSpacingAdjustments(raw), 0);
-  const questions = pkg.questions.map(raw => normalizeQuestionText(normalizeQuestion(raw, packageMeta)));
-  const currentQuestions = await getAll(db, 'questions');
-  const existingTextBases = await getAll(db, 'textBases');
-  const explicitTextBases = pkg.textBases ?? pkg.text_bases ?? pkg.textosBase ?? [];
-  const reservedTextBaseIds = new Set([...existingTextBases.map(item => item.id), ...(Array.isArray(explicitTextBases) ? explicitTextBases.map(item => str(item?.id)).filter(Boolean) : [])]);
-  const inferredTextBases = inferSharedTextBases(questions, currentQuestions, existingTextBases, reservedTextBaseIds);
+  const questions = pkg.questions.map(raw => normalizeQuestion(raw, packageMeta));
   const seenIds = new Set();
   for (const q of questions) {
     if (seenIds.has(q.id)) throw new Error(`O identificador ${q.id} aparece mais de uma vez no pacote.`);
     seenIds.add(q.id);
   }
-  const textBasesRaw = Array.isArray(explicitTextBases) ? [...explicitTextBases, ...inferredTextBases] : explicitTextBases;
+  const textBasesRaw = pkg.textBases ?? pkg.text_bases ?? pkg.textosBase ?? [];
   if (!Array.isArray(textBasesRaw)) throw new Error('A lista textBases precisa ser um array.');
   if (textBasesRaw.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw new Error('Há um texto-base que não está em um formato de objeto válido.');
-  const textBaseTextAdjustments = textBasesRaw.reduce((total, item) => total + ['title','titulo','content','text','conteudo'].filter(key => typeof item[key] === 'string' && normalizeImportedText(item[key]) !== item[key].trim()).length, 0);
-  const textBases = textBasesRaw.map(item => ({ id: str(item.id), title: normalizeImportedText(item.title ?? item.titulo), content: normalizeImportedText(item.content ?? item.text ?? item.conteudo), source: item.source ?? {}, updatedAt: new Date().toISOString() }));
+  const textBases = textBasesRaw.map(item => ({ id: str(item.id), title: str(item.title ?? item.titulo), content: str(item.content ?? item.text ?? item.conteudo), source: item.source ?? {}, updatedAt: new Date().toISOString() }));
   const textBaseIds = new Set(textBases.map(item => item.id));
   if (textBases.some(item => !item.id || !item.content)) throw new Error('Há um texto-base sem identificador ou conteúdo.');
   if (textBaseIds.size !== textBases.length) throw new Error('Há identificadores repetidos na lista de textos-base do pacote.');
+  const existingTextBases = await getAll(db, 'textBases');
   const existingTextBaseMap = new Map(existingTextBases.map(item => [item.id, item]));
   for (const item of textBases) {
     const existing = existingTextBaseMap.get(item.id);
@@ -410,7 +261,7 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
   for (const item of existingTextBases) textBaseIds.add(item.id);
   const textBasesToWrite = textBases.filter(item => !existingTextBaseMap.has(item.id));
 
-  let zipFiles = embeddedZipFiles || new Map();
+  let zipFiles = new Map();
   if (zipFile) zipFiles = await readZip(zipFile);
   const assets = [];
   const assetBlobs = [];
@@ -457,6 +308,7 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     if (issues.length) incomplete.push({ id: question.id, subject: question.subject, index, issues });
   });
 
+  const currentQuestions = await getAll(db, 'questions');
   const currentAliases = await getAll(db, 'aliases');
   const aliasMap = new Map(currentAliases.map(item => [item.alias, item.questionId]));
   const currentById = new Map(currentQuestions.map(item => [item.id, item]));
@@ -509,12 +361,7 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     filesFound: zipFiles.size,
     invalidAssetIds: [...invalidAssetIds],
     fileName: jsonFile.name,
-    imageFileName: embeddedZipFiles ? 'Incluído no ZIP completo' : (zipFile?.name || ''),
-    unifiedArchive: Boolean(embeddedZipFiles),
-    textBaseAssociations: questions.reduce((total, question) => total + [...new Set([question.textBaseId, ...(question.textBaseIds || [])].filter(Boolean))].length, 0),
-    normalizationAdjustments: questionTextAdjustments + textBaseTextAdjustments,
-    inferredTextBases: inferredTextBases.length,
-    inferredTextBaseDetails: inferredTextBases.map(item => ({ id: item.id, questionIds: [...(item.source?.questionIds || [])], lines: item.content.split('\n').filter(line => line.trim()).length, preview: item.content.slice(0, 220) })),
+    imageFileName: zipFile?.name || '',
     packageSource: packageMeta.source,
     totalQuestions: questions.length
   };
@@ -524,7 +371,7 @@ export function mergeQuestion(existing, incoming) {
   const merged = { ...existing };
   const scalarFields = ['area', 'subject', 'primaryTopic', 'difficulty', 'statement', 'explanation', 'textBaseId'];
   for (const field of scalarFields) if (!merged[field] && incoming[field]) merged[field] = incoming[field];
-  for (const field of ['secondaryTopics', 'relatedSubjects', 'subtopics', 'prerequisites', 'skills', 'errorCategories', 'textBaseIds']) merged[field] = [...new Set([...(merged[field] || []), ...(incoming[field] || [])])];
+  for (const field of ['secondaryTopics', 'relatedSubjects', 'subtopics', 'prerequisites', 'skills', 'errorCategories']) merged[field] = [...new Set([...(merged[field] || []), ...(incoming[field] || [])])];
   merged.alternatives = { ...(existing.alternatives || {}) };
   for (const [key, value] of Object.entries(incoming.alternatives || {})) if (!merged.alternatives[key]) merged.alternatives[key] = value;
   merged.alternativeExplanations = { ...(existing.alternativeExplanations || {}) };
