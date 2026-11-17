@@ -1770,7 +1770,8 @@ async function analyzeImport() {
       state.importWorker = worker;
       const draft = await new Promise((resolve, reject) => {
         worker.onmessage = event => event.data?.ok ? resolve(event.data.draft) : reject(new Error(event.data?.error || 'Falha ao analisar o pacote.'));
-        worker.onerror = event => reject(new Error(event.message || 'Falha no processamento em segundo plano.'));
+        worker.onerror = event => { event.preventDefault?.(); reject(new Error(event.message || 'Falha no processamento em segundo plano.')); };
+        worker.onmessageerror = () => reject(new Error('O navegador não conseguiu devolver os dados analisados pelo processo de importação. Tente novamente.'));
         worker.postMessage({ jsonFile: json, zipFile: zip });
       });
       worker.terminate(); state.importWorker = null;
@@ -2331,7 +2332,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.6.0');
+  await setSetting(state.db, 'appVersion', '1.6.1');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2762,7 +2763,7 @@ async function initialize() {
       await loadActivityAnswers(running.id);
     }
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-      navigator.serviceWorker.register('./sw.js').catch(error=>console.warn('Service Worker não registrado:',error));
+      navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(registration => registration.update()).catch(error=>console.warn('Service Worker não registrado:',error));
     }
   } catch (error) {
     console.error(error);

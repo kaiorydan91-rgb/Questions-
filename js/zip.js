@@ -1,5 +1,5 @@
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+const decoder = new TextDecoder('utf-8', { fatal: true });
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -9,6 +9,21 @@ const CRC_TABLE = (() => {
   }
   return table;
 })();
+
+const ZIP_LIMITS = Object.freeze({
+  archiveBytes: 512 * 1024 * 1024,
+  entries: 20000,
+  singleFileBytes: 100 * 1024 * 1024,
+  totalUncompressedBytes: 512 * 1024 * 1024
+});
+const ZIP32_MAX = 0xFFFFFFFF;
+const EOCD_SIGNATURE = 0x06054B50;
+const CENTRAL_SIGNATURE = 0x02014B50;
+const LOCAL_SIGNATURE = 0x04034B50;
+const DESCRIPTOR_SIGNATURE = 0x08074B50;
+const UTF8_FLAG = 0x0800;
+const DATA_DESCRIPTOR_FLAG = 0x0008;
+const ALLOWED_FLAGS = 0x080E; // Deflate options, data descriptor, and UTF-8 names.
 
 export function crc32(bytes) {
   let crc = 0xFFFFFFFF;
@@ -26,16 +41,54 @@ function safePath(path) {
   return parts.filter(part => part && part !== '.').join('/');
 }
 
-const ZIP_LIMITS = Object.freeze({
-  archiveBytes: 512 * 1024 * 1024,
-  entries: 20000,
-  singleFileBytes: 100 * 1024 * 1024,
-  totalUncompressedBytes: 512 * 1024 * 1024
-});
+const CP437_HIGH = 'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■ ';
 
-async function inflateRaw(bytes, maxBytes) {
-  if (typeof DecompressionStream === 'undefined') throw new Error('Este navegador não oferece suporte à descompactação ZIP necessária. Atualize o navegador.');
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+function decodeZipName(bytes, flags) {
+  if (flags & UTF8_FLAG) {
+    try { return decoder.decode(bytes); }
+    catch { throw new Error('O ZIP contém um nome de arquivo UTF-8 inválido. Recompacte usando nomes UTF-8.'); }
+  }
+  // ZIP names without general-purpose bit 11 use CP437 by specification.
+  let output = '';
+  for (const byte of bytes) output += byte < 0x80 ? String.fromCharCode(byte) : CP437_HIGH[byte - 0x80];
+  return output;
+}
+
+function findEndOfCentralDirectory(view, bytesLength) {
+  const minimum = Math.max(0, bytesLength - 22 - 65535);
+  for (let offset = bytesLength - 22; offset >= minimum; offset--) {
+    if (view.getUint32(offset, true) !== EOCD_SIGNATURE) continue;
+    const commentLength = view.getUint16(offset + 20, true);
+    // A valid EOCD and its optional comment must end exactly at EOF. This avoids
+    // mistaking a signature embedded inside a ZIP comment for the real EOCD.
+    if (offset + 22 + commentLength === bytesLength) return offset;
+  }
+  return -1;
+}
+
+function rejectZip64Extra(extraBytes, contextName) {
+  let offset = 0;
+  while (offset + 4 <= extraBytes.length) {
+    const id = extraBytes[offset] | (extraBytes[offset + 1] << 8);
+    const length = extraBytes[offset + 2] | (extraBytes[offset + 3] << 8);
+    offset += 4;
+    if (offset + length > extraBytes.length) throw new Error(`O campo extra do arquivo ${contextName} está truncado.`);
+    if (id === 0x0001) throw new Error('Este ZIP usa extensões ZIP64, que ainda não são aceitas nesta versão.');
+    offset += length;
+  }
+  if (offset !== extraBytes.length) throw new Error(`O campo extra do arquivo ${contextName} está malformado.`);
+}
+
+async function inflateRaw(bytes, maxBytes, name) {
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error(`O arquivo ${name} está compactado em DEFLATE, mas este navegador não oferece suporte à descompactação necessária. Atualize o navegador ou recompacte o ZIP sem compressão.`);
+  }
+  let stream;
+  try {
+    stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  } catch {
+    throw new Error(`Não foi possível iniciar a descompactação DEFLATE do arquivo ${name}. Atualize o navegador ou recompacte o ZIP sem compressão.`);
+  }
   const reader = stream.getReader();
   const chunks = [];
   let total = 0;
@@ -46,12 +99,15 @@ async function inflateRaw(bytes, maxBytes) {
       total += value.byteLength;
       if (total > maxBytes) {
         await reader.cancel('Limite de descompactação excedido.');
-        throw new Error('O conteúdo descompactado excedeu o tamanho declarado no ZIP ou o limite de segurança.');
+        throw new Error(`O conteúdo descompactado do arquivo ${name} ultrapassou o tamanho declarado ou o limite de segurança.`);
       }
       chunks.push(value);
     }
+  } catch (error) {
+    if (error instanceof Error && /ultrapassou o tamanho declarado/.test(error.message)) throw error;
+    throw new Error(`O conteúdo DEFLATE do arquivo ${name} está corrompido ou usa um formato não compatível.`);
   } finally {
-    reader.releaseLock();
+    try { reader.releaseLock(); } catch { /* reader may already be detached by the stream */ }
   }
   const output = new Uint8Array(total);
   let offset = 0;
@@ -60,27 +116,41 @@ async function inflateRaw(bytes, maxBytes) {
 }
 
 export async function readZip(fileOrBlob) {
-  if (!fileOrBlob || typeof fileOrBlob.arrayBuffer !== 'function') throw new Error('Arquivo ZIP inválido.');
-  if (Number(fileOrBlob.size || 0) > ZIP_LIMITS.archiveBytes) throw new Error('O ZIP ultrapassa o limite de 512 MB desta versão.');
-  const bytes = new Uint8Array(await fileOrBlob.arrayBuffer());
+  if (!fileOrBlob || typeof fileOrBlob.arrayBuffer !== 'function') throw new Error('Selecione um arquivo ZIP válido.');
+  const sourceBuffer = await fileOrBlob.arrayBuffer();
+  if (sourceBuffer.byteLength > ZIP_LIMITS.archiveBytes) throw new Error('O ZIP ultrapassa o limite de 512 MB desta versão.');
+  const bytes = new Uint8Array(sourceBuffer);
+  if (bytes.length < 22) throw new Error('O arquivo selecionado é pequeno demais para ser um ZIP válido.');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let eocd = -1;
-  const min = Math.max(0, bytes.length - 65557);
-  for (let i = bytes.length - 22; i >= min; i--) {
-    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-  }
-  if (eocd < 0) throw new Error('O arquivo selecionado não parece ser um ZIP válido.');
+  const eocd = findEndOfCentralDirectory(view, bytes.length);
+  if (eocd < 0) throw new Error('O arquivo selecionado não contém um diretório final ZIP válido. Verifique se o download terminou e tente selecionar o arquivo novamente.');
+
+  const diskNumber = view.getUint16(eocd + 4, true);
+  const centralDisk = view.getUint16(eocd + 6, true);
+  const entriesOnDisk = view.getUint16(eocd + 8, true);
   const entryCount = view.getUint16(eocd + 10, true);
   const centralSize = view.getUint32(eocd + 12, true);
   const centralOffset = view.getUint32(eocd + 16, true);
-  if (entryCount === 0xFFFF || centralOffset === 0xFFFFFFFF || centralSize === 0xFFFFFFFF) throw new Error('ZIPs com extensões ZIP64 ainda não são aceitos nesta versão.');
-  if (entryCount > ZIP_LIMITS.entries) throw new Error('O ZIP contém arquivos demais. O limite desta versão é 20.000 entradas.');
-  if (centralOffset + centralSize > eocd || centralOffset + centralSize > bytes.length) throw new Error('Índice interno do ZIP está incompleto ou fora dos limites.');
+  if (diskNumber !== 0 || centralDisk !== 0 || entriesOnDisk !== entryCount) {
+    throw new Error('Este ZIP é dividido em vários volumes. Exporte novamente como um único arquivo ZIP.');
+  }
+  if (entryCount === 0xFFFF || centralOffset === ZIP32_MAX || centralSize === ZIP32_MAX) {
+    throw new Error('Este ZIP usa extensões ZIP64, que ainda não são aceitas nesta versão. Recompacte no formato ZIP32.');
+  }
+  if (entryCount > ZIP_LIMITS.entries) throw new Error(`O ZIP contém arquivos demais. O limite desta versão é ${ZIP_LIMITS.entries.toLocaleString('pt-BR')} entradas.`);
+  const centralEnd = centralOffset + centralSize;
+  if (centralEnd !== eocd || centralEnd > bytes.length) {
+    throw new Error('O índice central do ZIP está incompleto, deslocado ou contém dados extras. Gere novamente o arquivo ZIP.');
+  }
+
   const files = new Map();
+  const localRanges = [];
   let totalUncompressed = 0;
   let cursor = centralOffset;
-  for (let i = 0; i < entryCount; i++) {
-    if (view.getUint32(cursor, true) !== 0x02014b50) throw new Error('Índice de arquivos do ZIP inválido.');
+  for (let index = 0; index < entryCount; index++) {
+    if (cursor + 46 > centralEnd || view.getUint32(cursor, true) !== CENTRAL_SIGNATURE) {
+      throw new Error(`O registro ${index + 1} do índice de arquivos ZIP está inválido ou truncado.`);
+    }
     const flags = view.getUint16(cursor + 8, true);
     const method = view.getUint16(cursor + 10, true);
     const expectedCrc = view.getUint32(cursor + 16, true);
@@ -89,56 +159,114 @@ export async function readZip(fileOrBlob) {
     const nameLength = view.getUint16(cursor + 28, true);
     const extraLength = view.getUint16(cursor + 30, true);
     const commentLength = view.getUint16(cursor + 32, true);
+    const startDisk = view.getUint16(cursor + 34, true);
     const localOffset = view.getUint32(cursor + 42, true);
     const recordEnd = cursor + 46 + nameLength + extraLength + commentLength;
-    if (recordEnd > centralOffset + centralSize) throw new Error('Registro de arquivo ZIP truncado.');
+    if (recordEnd > centralEnd) throw new Error(`O registro ${index + 1} do índice ZIP ultrapassa o limite declarado.`);
+    if (startDisk !== 0) throw new Error('O ZIP contém arquivos distribuídos em vários volumes.');
+    if ([compressedSize, uncompressedSize, localOffset].includes(ZIP32_MAX)) {
+      throw new Error('Este ZIP usa extensões ZIP64, que ainda não são aceitas nesta versão. Recompacte no formato ZIP32.');
+    }
+    if (flags & (0x0001 | 0x0040 | 0x2000)) throw new Error('O ZIP contém arquivos criptografados. Remova a senha e exporte novamente.');
+    if (flags & ~ALLOWED_FLAGS) throw new Error('O ZIP usa opções de compactação não suportadas. Exporte no formato ZIP padrão.');
+    if ((flags & 0x0006) && method !== 8) throw new Error('O ZIP contém opções DEFLATE incompatíveis com o método de compactação declarado.');
+    if (method !== 0 && method !== 8) throw new Error(`O ZIP usa o método de compactação ${method}, que não é suportado. Use ZIP armazenado ou DEFLATE.`);
     const nameBytes = bytes.slice(cursor + 46, cursor + 46 + nameLength);
-    const rawName = decoder.decode(nameBytes);
+    const rawName = decodeZipName(nameBytes, flags);
     const isDirectory = rawName.endsWith('/');
     const name = safePath(rawName);
+    const extraBytes = bytes.slice(cursor + 46 + nameLength, cursor + 46 + nameLength + extraLength);
+    rejectZip64Extra(extraBytes, name || `entrada ${index + 1}`);
     cursor = recordEnd;
-    if (!name || isDirectory) continue;
-    if (flags & 0x1) throw new Error(`O arquivo ${name} está criptografado. Envie um ZIP sem senha.`);
-    if (flags & 0x40) throw new Error(`O arquivo ${name} usa criptografia forte, que não é aceita nesta versão.`);
+    if (!name) throw new Error(`O ZIP contém um caminho vazio na entrada ${index + 1}.`);
+
     if (uncompressedSize > ZIP_LIMITS.singleFileBytes) throw new Error(`O arquivo ${name} ultrapassa o limite individual de 100 MB.`);
     totalUncompressed += uncompressedSize;
     if (totalUncompressed > ZIP_LIMITS.totalUncompressedBytes) throw new Error('O conteúdo descompactado ultrapassa o limite total de 512 MB.');
-    if (localOffset + 30 > centralOffset || localOffset + 30 > bytes.length) throw new Error(`Cabeçalho local inválido no arquivo ${name}.`);
-    if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error(`Cabeçalho local inválido no arquivo ${name}.`);
+
+    if (localOffset + 30 > centralOffset || localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== LOCAL_SIGNATURE) {
+      throw new Error(`Cabeçalho local inválido ou ausente no arquivo ${name}.`);
+    }
+    const localFlags = view.getUint16(localOffset + 6, true);
+    const localMethod = view.getUint16(localOffset + 8, true);
+    const localCrc = view.getUint32(localOffset + 14, true);
+    const localCompressedSize = view.getUint32(localOffset + 18, true);
+    const localUncompressedSize = view.getUint32(localOffset + 22, true);
     const localNameLength = view.getUint16(localOffset + 26, true);
     const localExtraLength = view.getUint16(localOffset + 28, true);
     const localHeaderEnd = localOffset + 30 + localNameLength + localExtraLength;
     if (localHeaderEnd > centralOffset) throw new Error(`Cabeçalho local incompleto no arquivo ${name}.`);
-    const localName = decoder.decode(bytes.slice(localOffset + 30, localOffset + 30 + localNameLength));
-    if (safePath(localName) !== name) throw new Error(`O nome local e o índice central divergem no arquivo ${name}.`);
-    if (view.getUint16(localOffset + 8, true) !== method) throw new Error(`O método de compactação diverge no arquivo ${name}.`);
+    if (localFlags !== flags || localMethod !== method) throw new Error(`Os cabeçalhos local e central divergem no arquivo ${name}.`);
+    const localNameBytes = bytes.slice(localOffset + 30, localOffset + 30 + localNameLength);
+    const localName = decodeZipName(localNameBytes, localFlags);
+    if (localName !== rawName) throw new Error(`O nome do arquivo ${name} diverge entre os cabeçalhos do ZIP.`);
+    const localExtraBytes = bytes.slice(localOffset + 30 + localNameLength, localHeaderEnd);
+    rejectZip64Extra(localExtraBytes, name);
+    if (localCompressedSize === ZIP32_MAX || localUncompressedSize === ZIP32_MAX) throw new Error('Este ZIP usa extensões ZIP64, que ainda não são aceitas nesta versão.');
+    const hasDescriptor = Boolean(flags & DATA_DESCRIPTOR_FLAG);
+    if (!hasDescriptor && (localCrc !== expectedCrc || localCompressedSize !== compressedSize || localUncompressedSize !== uncompressedSize)) {
+      throw new Error(`Os tamanhos ou o CRC do cabeçalho local não conferem no arquivo ${name}.`);
+    }
+    if (hasDescriptor && !((localCrc === 0 || localCrc === expectedCrc) && (localCompressedSize === 0 || localCompressedSize === compressedSize) && (localUncompressedSize === 0 || localUncompressedSize === uncompressedSize))) {
+      throw new Error(`Os dados preliminares do cabeçalho local não conferem no arquivo ${name}.`);
+    }
+
     const dataStart = localHeaderEnd;
     const dataEnd = dataStart + compressedSize;
     if (dataEnd > centralOffset || dataEnd > bytes.length) throw new Error(`Conteúdo compactado incompleto no arquivo ${name}.`);
+    let recordDataEnd = dataEnd;
+    if (hasDescriptor) {
+      if (recordDataEnd + 12 > centralOffset) throw new Error(`O descritor de dados do arquivo ${name} está truncado.`);
+      let descriptorStart = recordDataEnd;
+      if (view.getUint32(descriptorStart, true) === DESCRIPTOR_SIGNATURE) descriptorStart += 4;
+      if (descriptorStart + 12 > centralOffset) throw new Error(`O descritor de dados do arquivo ${name} está incompleto.`);
+      const descriptorCrc = view.getUint32(descriptorStart, true);
+      const descriptorCompressed = view.getUint32(descriptorStart + 4, true);
+      const descriptorUncompressed = view.getUint32(descriptorStart + 8, true);
+      if (descriptorCrc !== expectedCrc || descriptorCompressed !== compressedSize || descriptorUncompressed !== uncompressedSize) {
+        throw new Error(`O descritor de integridade do arquivo ${name} não confere.`);
+      }
+      recordDataEnd = descriptorStart + 12;
+    }
+    localRanges.push({ start: localOffset, end: recordDataEnd, name });
+
     const compressed = bytes.slice(dataStart, dataEnd);
     let content;
-    if (method === 0) content = compressed;
-    else if (method === 8) content = await inflateRaw(compressed, Math.min(ZIP_LIMITS.singleFileBytes, uncompressedSize));
-    else throw new Error(`O formato de compactação do arquivo ${name} não é suportado.`);
+    if (method === 0) {
+      if (compressedSize !== uncompressedSize) throw new Error(`O tamanho compactado do arquivo ${name} não confere com o método armazenado.`);
+      content = compressed;
+    } else {
+      content = await inflateRaw(compressed, Math.min(ZIP_LIMITS.singleFileBytes, uncompressedSize), name);
+    }
     if (content.length !== uncompressedSize) throw new Error(`O tamanho do arquivo ${name} não confere após a extração.`);
-    if (crc32(content) !== expectedCrc) throw new Error(`A verificação de integridade do arquivo ${name} falhou.`);
-    if (files.has(name)) throw new Error(`O ZIP contém o caminho duplicado ${name}.`);
-    files.set(name, new Blob([content]));
+    if (crc32(content) !== expectedCrc) throw new Error(`A verificação de integridade CRC do arquivo ${name} falhou.`);
+    if (!isDirectory) {
+      if (files.has(name)) throw new Error(`O ZIP contém o caminho duplicado ${name}.`);
+      files.set(name, new Blob([content]));
+    }
+  }
+  if (cursor !== centralEnd) throw new Error('O índice central do ZIP contém bytes extras ou registros não declarados.');
+  localRanges.sort((a, b) => a.start - b.start);
+  for (let index = 1; index < localRanges.length; index++) {
+    if (localRanges[index].start < localRanges[index - 1].end) {
+      throw new Error(`Os dados dos arquivos ${localRanges[index - 1].name} e ${localRanges[index].name} se sobrepõem dentro do ZIP.`);
+    }
   }
   return files;
 }
 
 export async function writeZip(entries) {
   if (!Array.isArray(entries)) throw new Error('A lista de arquivos do ZIP é inválida.');
-  if (entries.length > ZIP_LIMITS.entries) throw new Error('O pacote contém arquivos demais para esta versão.');
+  if (entries.length > ZIP_LIMITS.entries || entries.length > 65534) throw new Error('O pacote contém arquivos demais para esta versão do formato ZIP32.');
   const localParts = [];
   const centralParts = [];
   let offset = 0;
   let totalUncompressed = 0;
   const seenNames = new Set();
   for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || !('name' in entry)) throw new Error('Há um item de arquivo inválido na lista do ZIP.');
     const name = safePath(entry.name);
-    if (!name) continue;
+    if (!name) throw new Error('O ZIP não pode conter um arquivo sem nome.');
     if (seenNames.has(name)) throw new Error(`O ZIP não pode conter o arquivo duplicado ${name}.`);
     seenNames.add(name);
     let data;
@@ -146,22 +274,30 @@ export async function writeZip(entries) {
     else if (entry.data instanceof Uint8Array) data = entry.data;
     else if (entry.data instanceof ArrayBuffer) data = new Uint8Array(entry.data);
     else if (typeof entry.data === 'string') data = encoder.encode(entry.data);
-    else data = new Uint8Array();
+    else throw new Error(`O conteúdo do arquivo ${name} precisa ser Blob, ArrayBuffer, Uint8Array ou texto.`);
     if (data.length > ZIP_LIMITS.singleFileBytes) throw new Error(`O arquivo ${name} ultrapassa o limite de 100 MB.`);
     totalUncompressed += data.length;
     if (totalUncompressed > ZIP_LIMITS.totalUncompressedBytes) throw new Error('O conteúdo do ZIP ultrapassa o limite total de 512 MB.');
     const nameBytes = encoder.encode(name);
-    if (nameBytes.length > 65535) throw new Error('O nome de um arquivo do ZIP é longo demais.');
-    if (data.length > 0xFFFFFFFF || offset > 0xFFFFFFFF) throw new Error('O pacote excede os limites do formato ZIP32.');
+    if (!nameBytes.length || nameBytes.length > 65535) throw new Error('O nome de um arquivo do ZIP é vazio ou longo demais.');
+    const localLength = 30 + nameBytes.length;
+    if (data.length > ZIP32_MAX || offset + localLength + data.length > ZIP32_MAX) throw new Error('O pacote excede os limites de tamanho do formato ZIP32.');
     const checksum = crc32(data);
-    const local = new Uint8Array(30 + nameBytes.length);
+
+    // DOS date 0x0021 means 1980-01-01. A zero date encodes month/day as
+    // 0/0 (invalid); some ZIP readers reject files created with that value.
+    const dosTime = 0x0000;
+    const dosDate = 0x0021;
+    const flags = UTF8_FLAG;
+
+    const local = new Uint8Array(localLength);
     const lv = new DataView(local.buffer);
-    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint32(0, LOCAL_SIGNATURE, true);
     lv.setUint16(4, 20, true);
-    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(6, flags, true);
     lv.setUint16(8, 0, true);
-    lv.setUint16(10, 0, true);
-    lv.setUint16(12, 0, true);
+    lv.setUint16(10, dosTime, true);
+    lv.setUint16(12, dosDate, true);
     lv.setUint32(14, checksum, true);
     lv.setUint32(18, data.length, true);
     lv.setUint32(22, data.length, true);
@@ -172,13 +308,13 @@ export async function writeZip(entries) {
 
     const central = new Uint8Array(46 + nameBytes.length);
     const cv = new DataView(central.buffer);
-    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint32(0, CENTRAL_SIGNATURE, true);
     cv.setUint16(4, 20, true);
     cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(8, flags, true);
     cv.setUint16(10, 0, true);
-    cv.setUint16(12, 0, true);
-    cv.setUint16(14, 0, true);
+    cv.setUint16(12, dosTime, true);
+    cv.setUint16(14, dosDate, true);
     cv.setUint32(16, checksum, true);
     cv.setUint32(20, data.length, true);
     cv.setUint32(24, data.length, true);
@@ -191,15 +327,19 @@ export async function writeZip(entries) {
     cv.setUint32(42, offset, true);
     central.set(nameBytes, 46);
     centralParts.push(central);
-    offset += local.length + data.length;
+    offset += localLength + data.length;
   }
   const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
   const centralOffset = offset;
   const count = centralParts.length;
-  if (count > 65535 || centralSize > 0xFFFFFFFF || centralOffset > 0xFFFFFFFF) throw new Error('O pacote excede os limites do formato ZIP32.');
+  const archiveSize = centralOffset + centralSize + 22;
+  if (count > 65534 || centralSize > ZIP32_MAX || centralOffset > ZIP32_MAX || archiveSize > ZIP32_MAX) {
+    throw new Error('O pacote excede os limites do formato ZIP32.');
+  }
+  if (archiveSize > ZIP_LIMITS.archiveBytes) throw new Error('O ZIP final ultrapassa o limite de 512 MB desta versão.');
   const end = new Uint8Array(22);
   const ev = new DataView(end.buffer);
-  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint32(0, EOCD_SIGNATURE, true);
   ev.setUint16(4, 0, true);
   ev.setUint16(6, 0, true);
   ev.setUint16(8, count, true);
