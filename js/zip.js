@@ -54,13 +54,51 @@ function decodeZipName(bytes, flags) {
   return output;
 }
 
+async function readBlobBytes(fileOrBlob) {
+  let arrayBufferError = null;
+  try {
+    const buffer = await fileOrBlob.arrayBuffer();
+    const expected = Number(fileOrBlob.size) || 0;
+    if (!expected || buffer.byteLength === expected) return new Uint8Array(buffer);
+    arrayBufferError = `arrayBuffer() retornou ${buffer.byteLength} bytes, mas o arquivo declara ${expected} bytes`;
+  } catch (error) {
+    arrayBufferError = error?.message || String(error);
+  }
+
+  // Some Android document providers expose a File that can be selected but whose
+  // arrayBuffer() result is incomplete inside a module Worker. FileReader is a
+  // second independent read path before rejecting the selected file.
+  if (typeof FileReader !== 'undefined') {
+    try {
+      const buffer = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error || new Error('Falha ao ler o arquivo com FileReader.'));
+        reader.onabort = () => reject(new Error('A leitura do arquivo foi cancelada.'));
+        reader.onload = () => resolve(reader.result);
+        reader.readAsArrayBuffer(fileOrBlob);
+      });
+      const expected = Number(fileOrBlob.size) || 0;
+      if (buffer instanceof ArrayBuffer && (!expected || buffer.byteLength === expected)) return new Uint8Array(buffer);
+      throw new Error(`FileReader retornou ${buffer?.byteLength ?? 'um resultado inválido'} bytes; tamanho declarado: ${expected || 'desconhecido'}.`);
+    } catch (error) {
+      throw new Error(`Não foi possível ler o arquivo selecionado por dois métodos. ${arrayBufferError}; segunda tentativa: ${error?.message || String(error)}`);
+    }
+  }
+  throw new Error(`Não foi possível ler o arquivo selecionado. ${arrayBufferError}`);
+}
+
+function hexPreview(bytes, fromEnd = false) {
+  const slice = fromEnd ? bytes.slice(Math.max(0, bytes.length - 24)) : bytes.slice(0, 8);
+  return [...slice].map(value => value.toString(16).padStart(2, '0')).join(' ');
+}
+
 function findEndOfCentralDirectory(view, bytesLength) {
   const minimum = Math.max(0, bytesLength - 22 - 65535);
   for (let offset = bytesLength - 22; offset >= minimum; offset--) {
     if (view.getUint32(offset, true) !== EOCD_SIGNATURE) continue;
     const commentLength = view.getUint16(offset + 20, true);
-    // A valid EOCD and its optional comment must end exactly at EOF. This avoids
-    // mistaking a signature embedded inside a ZIP comment for the real EOCD.
+    // EOCD and its declared comment must end exactly at EOF. Validate the comment
+    // length as well, so a false signature inside compressed data is not accepted.
     if (offset + 22 + commentLength === bytesLength) return offset;
   }
   return -1;
@@ -117,13 +155,17 @@ async function inflateRaw(bytes, maxBytes, name) {
 
 export async function readZip(fileOrBlob) {
   if (!fileOrBlob || typeof fileOrBlob.arrayBuffer !== 'function') throw new Error('Selecione um arquivo ZIP válido.');
-  const sourceBuffer = await fileOrBlob.arrayBuffer();
-  if (sourceBuffer.byteLength > ZIP_LIMITS.archiveBytes) throw new Error('O ZIP ultrapassa o limite de 512 MB desta versão.');
-  const bytes = new Uint8Array(sourceBuffer);
-  if (bytes.length < 22) throw new Error('O arquivo selecionado é pequeno demais para ser um ZIP válido.');
+  const bytes = await readBlobBytes(fileOrBlob);
+  if (bytes.byteLength > ZIP_LIMITS.archiveBytes) throw new Error('O ZIP ultrapassa o limite de 512 MB desta versão.');
+  if (bytes.length < 22) throw new Error(`O arquivo selecionado é pequeno demais para ser um ZIP válido (${bytes.length} bytes).`);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const eocd = findEndOfCentralDirectory(view, bytes.length);
-  if (eocd < 0) throw new Error('O arquivo selecionado não contém um diretório final ZIP válido. Verifique se o download terminou e tente selecionar o arquivo novamente.');
+  if (eocd < 0) {
+    const name = String(fileOrBlob.name || 'arquivo sem nome');
+    const declared = Number(fileOrBlob.size) || 0;
+    const type = String(fileOrBlob.type || 'não informado');
+    throw new Error(`O conteúdo recebido não contém o final de um ZIP válido. Arquivo: ${name}; tamanho declarado: ${declared || 'não informado'} bytes; bytes lidos: ${bytes.length}; tipo: ${type}; início: [${hexPreview(bytes)}]; final: [${hexPreview(bytes, true)}]. Confirme se selecionou o ZIP concluído, não um atalho, pré-visualização ou arquivo parcial.`);
+  }
 
   const diskNumber = view.getUint16(eocd + 4, true);
   const centralDisk = view.getUint16(eocd + 6, true);

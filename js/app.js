@@ -854,7 +854,7 @@ async function renderSession() {
     questionMarkup += `<section class="shared-text-group">${textBlocks}<div class="shared-question-list">${groupQuestions.map(q => renderQuestionCard(q, indexById.get(q.id), true)).join('')}</div></section>`;
   }
   const gridColumns = Math.max(4, Math.min(10, Math.ceil(Math.sqrt(questions.length))));
-  const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${questions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${questions.length ? answered / questions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${questionMarkup}</div><aside class="glass-card exam-side"><div class="exam-side-heading"><h3>Navegação</h3><span>${questions.length}</span></div><div class="exam-number-grid" style="--exam-nav-columns:${gridColumns}">${questions.map((q,index) => { const label = responseNavigationLabel(q, state.activityAnswers.get(q.id)); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index+1}${label ? `, resposta ${label}` : ', em branco'}"><span>${index + 1}</span>${label ? `<small>${escapeHTML(label)}</small>` : ''}</button>`; }).join('')}</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
+  const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${questions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${questions.length ? answered / questions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${questionMarkup}</div><aside class="glass-card exam-side"><div class="exam-side-heading"><h3>Navegação</h3><span>${questions.length}</span></div><div class="exam-number-grid" style="--exam-nav-columns:${gridColumns}">${questions.map((q,index) => { const label = responseNavigationLabel(q, state.activityAnswers.get(q.id)); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index+1}${label ? `, resposta ${label}` : ', em branco'}"><span>${index + 1}</span>${label ? `<small>${escapeHTML(label)}</small>` : ''}</button>`; }).join('')}</div><button class="button secondary" data-action="clear-activity-answers" title="Desmarcar as alternativas desta atividade">Deixar tudo em branco</button><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('#activitySession').innerHTML = html;
   $('.activity-layout').classList.add('hidden');
@@ -1763,19 +1763,37 @@ async function analyzeImport() {
   if (selectedFile && /\.zip$/i.test(selectedFile.name) && (legacyJson || zip)) return toast('Para importar um ZIP completo, não selecione os arquivos do formato antigo.');
   const analyze = $('#analyzeImport'); analyze.disabled = true; analyze.textContent = 'Analisando…';
   try {
-    // Parse JSON and ZIP in a module Worker so large packages do not freeze the interface.
+    // Prefer the module Worker, but retry with the original File on the main
+    // thread if a mobile browser cannot read a structured-cloned File correctly.
     if (typeof Worker !== 'undefined') {
-      state.importWorker?.terminate?.();
-      const worker = new Worker('./js/import-worker.js', { type: 'module' });
-      state.importWorker = worker;
-      const draft = await new Promise((resolve, reject) => {
-        worker.onmessage = event => event.data?.ok ? resolve(event.data.draft) : reject(new Error(event.data?.error || 'Falha ao analisar o pacote.'));
-        worker.onerror = event => { event.preventDefault?.(); reject(new Error(event.message || 'Falha no processamento em segundo plano.')); };
-        worker.onmessageerror = () => reject(new Error('O navegador não conseguiu devolver os dados analisados pelo processo de importação. Tente novamente.'));
-        worker.postMessage({ jsonFile: json, zipFile: zip });
-      });
-      worker.terminate(); state.importWorker = null;
-      state.importDraft = draft;
+      let worker = null;
+      try {
+        state.importWorker?.terminate?.();
+        worker = new Worker('./js/import-worker.js', { type: 'module' });
+        state.importWorker = worker;
+        const draft = await new Promise((resolve, reject) => {
+          worker.onmessage = event => event.data?.ok ? resolve(event.data.draft) : reject(new Error(event.data?.error || 'Falha ao analisar o pacote.'));
+          worker.onerror = event => { event.preventDefault?.(); reject(new Error(event.message || 'Falha no processamento em segundo plano.')); };
+          worker.onmessageerror = () => reject(new Error('O navegador não conseguiu devolver os dados analisados pelo processo de importação. Tente novamente.'));
+          worker.postMessage({ jsonFile: json, zipFile: zip });
+        });
+        worker.terminate(); state.importWorker = null;
+        state.importDraft = draft;
+      } catch (workerError) {
+        worker?.terminate?.(); state.importWorker = null;
+        // This retry also distinguishes a Worker/File-cloning issue from an
+        // actually truncated or invalid download and preserves the user's file.
+        try {
+          state.importDraft = await prepareQuestionImport(state.db, json, zip);
+        } catch (directError) {
+          const workerMessage = workerError?.message || String(workerError);
+          const directMessage = directError?.message || String(directError);
+          throw new Error(workerMessage === directMessage
+            ? directMessage
+            : `A leitura no processo em segundo plano falhou: ${workerMessage}
+A leitura direta do arquivo também falhou: ${directMessage}`);
+        }
+      }
     } else {
       state.importDraft = await prepareQuestionImport(state.db, json, zip);
     }
@@ -2332,7 +2350,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.6.1');
+  await setSetting(state.db, 'appVersion', '1.6.3');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2384,6 +2402,22 @@ async function deleteSavedActivity(id) {
   renderActivityBuilder();
   toast('Atividade salva excluída. As questões continuam no banco.');
 }
+async function clearCurrentActivityAnswers() {
+  const activity = state.currentActivity;
+  if (!activity || activity.status !== 'running') return toast('Não há atividade em andamento para limpar.');
+  const related = state.data.answers.filter(item => item.activityId === activity.id);
+  const toClear = related.filter(item => String(item.response || '').trim() || (item.dimmedOptions || item.eliminatedOptions || []).length);
+  if (!toClear.length) return toast('Todas as questões já estão em branco.');
+  if (!confirm(`Deixar todas as ${activity.questionIds.length} questões em branco?\n\n${toClear.length} respostas e marcações de alternativas serão removidas desta atividade. Grifos, confiança e sinalizações de revisão serão preservados.`)) return;
+  for (const old of toClear) {
+    const updated = { ...old, response: '', dimmedOptions: [], eliminatedOptions: undefined, updatedAt: nowISO() };
+    await putRecord(state.db, 'answers', updated);
+    syncAnswerCache(updated);
+  }
+  await renderSession();
+  toast(`${toClear.length} respostas removidas. As questões estão em branco.`);
+}
+
 async function discardCurrentActivity() {
   const activity = state.currentActivity;
   if (!activity || activity.status !== 'running') return;
@@ -2609,6 +2643,7 @@ document.addEventListener('click', async event => {
     else if (action === 'restore-question-version') await restoreQuestionVersion(actionButton.dataset.id, Number(actionButton.dataset.versionIndex));
     else if (action === 'save-question-edit') await saveQuestionEdit(actionButton.dataset.id);
     else if (action === 'finish-activity') await finishActivity(false);
+    else if (action === 'clear-activity-answers') await clearCurrentActivityAnswers();
     else if (action === 'discard-activity') await discardCurrentActivity();
     else if (action === 'resume-activity') await resumeSavedActivity(actionButton.dataset.id);
     else if (action === 'delete-saved-activity') await deleteSavedActivity(actionButton.dataset.id);
