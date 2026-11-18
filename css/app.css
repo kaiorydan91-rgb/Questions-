@@ -662,3 +662,27 @@ input:not([type=checkbox]):not([type=radio]), select, textarea { padding: 8px 9p
   box-shadow: none;
   font-weight: 400;
 }
+
+
+/* v1.5.5 — imagens de resolução geral e comentários por alternativa */
+.answer-feedback .question-assets,
+.alternative-comment .question-assets,
+.full-explanation .question-assets {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  max-width: 820px;
+  margin: 10px 0 2px;
+}
+.answer-feedback .question-assets figure,
+.alternative-comment .question-assets figure,
+.full-explanation .question-assets figure {
+  padding: 9px;
+  background: rgba(8, 11, 25, .42);
+}
+.answer-feedback .question-assets img,
+.alternative-comment .question-assets img,
+.full-explanation .question-assets img {
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+}
