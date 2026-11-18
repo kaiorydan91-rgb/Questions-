@@ -306,7 +306,7 @@ function renderBank() {
     $('#bankPagination').innerHTML = '';
     return;
   }
-  $('#bankList').innerHTML = visible.map(q => `<article class="question-row"><div class="question-number">${escapeHTML(String(q.sourceQuestionNumber || '•'))}</div><div><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${escapeHTML(q.primaryTopic || 'Sem assunto')}</span><span class="tag">${escapeHTML(q.difficulty || 'Sem nível')}</span>${q.explanation || Object.keys(q.alternativeExplanations || {}).length ? '<span class="tag">Comentada</span>' : '<span class="tag">Gabarito</span>'}${q.images?.length ? '<span class="tag">Imagem</span>' : ''}${(q.relatedSubjects||[]).map(item=>`<span class="tag">Interdisciplinar: ${escapeHTML(item)}</span>`).join('')}${q.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(q.classificationConfidence*100)}% confiança</span>` : ''}</div><h3>${escapeHTML(q.id)}</h3><p>${richText(q.statement)}</p>${renderQuestionReferences(q)}</div><div class="row-actions"><button class="icon-action ${q.favorite ? 'active' : ''}" data-action="favorite" data-id="${safeAttr(q.id)}" title="${q.favorite ? 'Remover favorita' : 'Favoritar'}">${q.favorite ? '★' : '☆'}</button><button class="icon-action" data-open-question="${safeAttr(q.id)}" title="Abrir questão">↗</button></div></article>`).join('');
+  $('#bankList').innerHTML = visible.map(q => `<article class="question-row"><div class="question-number">${escapeHTML(String(q.sourceQuestionNumber || '•'))}</div><div><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${escapeHTML(q.primaryTopic || 'Sem assunto')}</span><span class="tag">${escapeHTML(q.difficulty || 'Sem nível')}</span>${hasExplanationContent(q) ? '<span class="tag">Comentada</span>' : '<span class="tag">Gabarito</span>'}${q.images?.length ? '<span class="tag">Imagem</span>' : ''}${(q.relatedSubjects||[]).map(item=>`<span class="tag">Interdisciplinar: ${escapeHTML(item)}</span>`).join('')}${q.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(q.classificationConfidence*100)}% confiança</span>` : ''}</div><h3>${escapeHTML(q.id)}</h3><p>${richText(q.statement)}</p>${renderQuestionReferences(q)}</div><div class="row-actions"><button class="icon-action ${q.favorite ? 'active' : ''}" data-action="favorite" data-id="${safeAttr(q.id)}" title="${q.favorite ? 'Remover favorita' : 'Favoritar'}">${q.favorite ? '★' : '☆'}</button><button class="icon-action" data-open-question="${safeAttr(q.id)}" title="Abrir questão">↗</button></div></article>`).join('');
   $('#bankPagination').innerHTML = pageCount > 1 ? `<span class="fine-print">Página ${state.bankPage} de ${pageCount}</span><div class="pagination-actions"><button class="button secondary" data-bank-page="${Math.max(1,state.bankPage-1)}" ${state.bankPage===1?'disabled':''}>Anterior</button><button class="button secondary" data-bank-page="${Math.min(pageCount,state.bankPage+1)}" ${state.bankPage===pageCount?'disabled':''}>Próxima</button></div>` : '';
 }
 
@@ -684,16 +684,42 @@ async function hydrateAssetImages(root = document) {
   }
   await Promise.all(images.map(element => loadAssetImage(element)));
 }
+function normalizeImagePosition(position, fallback = 'statement') {
+  return String(position || fallback).trim().toLowerCase().replace(/\s*:\s*/g, ':');
+}
 function renderQuestionImages(question, positions = null) {
   if (!question.images?.length) return '';
-  const allowed = positions ? new Set(positions) : null;
-  const selected = question.images.filter(image => !allowed || allowed.has(String(image.position || 'statement').toLowerCase()));
+  const allowed = positions ? new Set(positions.map(value => normalizeImagePosition(value))) : null;
+  const selected = question.images.filter(image => !allowed || allowed.has(normalizeImagePosition(image.position)));
   if (!selected.length) return '';
   return `<div class="question-assets">${selected.map(image => renderSingleImage(question, image)).join('')}</div>`;
 }
+const GENERAL_EXPLANATION_IMAGE_POSITIONS = ['explanation', 'after_explanation', 'general_explanation', 'resolution', 'resolucao'];
+function renderExplanationImages(question) {
+  return renderQuestionImages(question, GENERAL_EXPLANATION_IMAGE_POSITIONS);
+}
+function renderAlternativeExplanationImages(question, key) {
+  const letter = String(key || '').trim().toUpperCase();
+  if (!letter) return '';
+  return renderQuestionImages(question, [
+    `alternative_explanation:${letter}`,
+    `alternative-explanation:${letter}`,
+    `alternative_comment:${letter}`,
+    `alternative-comment:${letter}`
+  ]);
+}
+function getAlternativeExplanationText(question, key) {
+  const letter = String(key || '').trim().toUpperCase();
+  const explanations = question.alternativeExplanations || {};
+  return String(explanations[letter] ?? explanations[letter.toLowerCase()] ?? '').trim();
+}
+function hasExplanationContent(question) {
+  return Boolean(question.explanation || renderExplanationImages(question) || Object.keys(question.alternativeExplanations || {}).length ||
+    (question.images || []).some(image => /^(alternative[_-]explanation|alternative[_-]comment):/i.test(String(image.position || '').trim())));
+}
 function renderOptionImages(question, key) {
-  const normalized = [`option:${key}`, `alternative:${key}`, `alternativa:${key}`];
-  const items = question.images?.filter(image => normalized.includes(String(image.position || '').toLowerCase())) || [];
+  const normalized = [`option:${key}`, `alternative:${key}`, `alternativa:${key}`].map(value => value.toLowerCase());
+  const items = question.images?.filter(image => normalized.includes(normalizeImagePosition(image.position))) || [];
   return items.length ? `<div class="question-assets">${items.map(image => renderSingleImage(question, image)).join('')}</div>` : '';
 }
 function renderQuestionTables(question, positions = ['after_statement']) {
@@ -718,12 +744,13 @@ function renderResponseOptions(question, current = '', answerRecord = {}, config
   const selectedKey = String(current || '').trim().toUpperCase();
   const isComplete = responseIsComplete(question, current);
   const isCorrect = isComplete && responseIsCorrect(question, current);
-  const alternativeExplanations = question.alternativeExplanations || {};
   return `<div class="answer-options" id="options-q-${safeAttr(question.id)}">${Object.entries(question.alternatives || {}).map(([key,value]) => {
     const selected = selectedKey === key.toUpperCase();
     const isDimmed = dimmed.has(key) || dimmed.has(String(key).toUpperCase());
-    const specificComment = selected && canShowComment && isComplete ? (alternativeExplanations[key] || alternativeExplanations[key.toLowerCase()] || '') : '';
-    return `<div class="answer-option-row"><label class="answer-option ${isDimmed ? 'dimmed' : ''}" data-hold-option="${safeAttr(key)}" data-question-option="${safeAttr(question.id)}" aria-label="Alternativa ${escapeHTML(key)}"><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${selected ? 'checked' : ''}><span class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</span></label>${specificComment ? `<div class="alternative-comment ${isCorrect ? 'correct' : 'wrong'}"><b>${isCorrect ? 'Comentário da alternativa marcada' : `Por que a alternativa ${escapeHTML(key)} está incorreta`}</b><p>${richText(specificComment)}</p></div>` : ''}</div>`;
+    const specificComment = selected && canShowComment && isComplete ? getAlternativeExplanationText(question, key) : '';
+    const specificImages = selected && canShowComment && isComplete ? renderAlternativeExplanationImages(question, key) : '';
+    const hasSpecificComment = Boolean(specificComment || specificImages);
+    return `<div class="answer-option-row"><label class="answer-option ${isDimmed ? 'dimmed' : ''}" data-hold-option="${safeAttr(key)}" data-question-option="${safeAttr(question.id)}" aria-label="Alternativa ${escapeHTML(key)}"><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${selected ? 'checked' : ''}><span class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</span></label>${hasSpecificComment ? `<div class="alternative-comment ${isCorrect ? 'correct' : 'wrong'}"><b>${isCorrect ? 'Comentário da alternativa marcada' : `Por que a alternativa ${escapeHTML(key)} está incorreta`}</b>${specificComment ? `<p>${richText(specificComment)}</p>` : ''}${specificImages}</div>` : ''}</div>`;
   }).join('')}</div>`;
 }
 
@@ -731,12 +758,14 @@ function renderQuestionFeedback(question, answer, config, final = false) {
   if (!answer?.response || !responseIsComplete(question, answer.response)) return '';
   const reveal = final || (config.correctionMode === 'immediate' && config.showErrors);
   const showComment = final ? config.commentMode !== 'hidden' : config.commentMode === 'available' && config.correctionMode === 'immediate';
-  if (!reveal && !(showComment && question.explanation)) return '';
+  const explanationImages = showComment ? renderExplanationImages(question) : '';
+  const hasExplanation = Boolean(showComment && (question.explanation || explanationImages));
+  if (!reveal && !hasExplanation) return '';
   const correct = responseIsCorrect(question, answer.response);
   const expected = getExpectedAnswer(question);
   const answerLabel = question.type === 'multiple_choice' ? `${expected}) ${question.alternatives?.[expected] || ''}` : expected;
   const kind = correct ? 'correct' : 'wrong';
-  const explanation = showComment && question.explanation ? `<p>${richText(question.explanation)}</p>` : '';
+  const explanation = showComment ? `${question.explanation ? `<p>${richText(question.explanation)}</p>` : ''}${explanationImages}` : '';
   if (!reveal && !explanation) return '';
   return `<div class="answer-feedback ${reveal ? kind : 'neutral'}">${reveal ? `<b>${correct ? 'Resposta correta' : 'Resposta incorreta'}</b> · Gabarito: ${escapeHTML(answerLabel)}` : '<b>Comentário disponível</b>'}${explanation}</div>`;
 }
@@ -750,7 +779,7 @@ async function renderSession() {
   const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${questions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${questions.length ? answered / questions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${questions.map((q,index) => {
     const answer = state.activityAnswers.get(q.id);
     const textBase = textBaseById(q.textBaseId);
-    return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${q.explanation || Object.keys(q.alternativeExplanations || {}).length ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem" data-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, activity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
+    return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${hasExplanationContent(q) ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem" data-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, activity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
   }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid">${questions.map((q,index) => `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button">${index + 1}</button>`).join('')}</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('#activitySession').innerHTML = html;
@@ -785,6 +814,7 @@ async function saveQuestionResponse(questionId) {
   if (options) options.outerHTML = renderResponseOptions(question, record.response || '', record, state.currentActivity.config);
   const feedback = $('#feedback-' + CSS.escape(questionId));
   if (feedback) feedback.innerHTML = renderQuestionFeedback(question, record, state.currentActivity.config);
+  await hydrateAssetImages(card);
   const saved = $('#saved-' + CSS.escape(questionId));
   if (saved) saved.textContent = response ? (complete ? 'Resposta salva automaticamente' : 'Resposta parcial salva automaticamente') : 'Ainda não respondida';
   const count = state.currentActivity.questionIds.reduce((total, id) => total + answerCount(id), 0);
@@ -923,11 +953,15 @@ async function renderResult(activity) {
     const userValue = complete ? escapeHTML(answer.response) : (answer.response ? `Parcial (${escapeHTML(answer.response)}) — não contabilizada` : 'Sem resposta');
     const rightLabel = q.type === 'multiple_choice' ? `${correctAnswer}) ${q.alternatives?.[correctAnswer] || ''}` : correctAnswer;
     const selectedKey = String(answer.response || '').trim().toUpperCase();
-    const selectedAlternativeExplanation = q.type === 'multiple_choice' ? (q.alternativeExplanations?.[selectedKey] || q.alternativeExplanations?.[selectedKey.toLowerCase()] || '') : '';
+    const selectedAlternativeExplanation = q.type === 'multiple_choice' ? getAlternativeExplanationText(q, selectedKey) : '';
+    const selectedAlternativeImages = q.type === 'multiple_choice' ? renderAlternativeExplanationImages(q, selectedKey) : '';
+    const generalExplanationImages = renderExplanationImages(q);
     const textBase = textBaseById(q.textBaseId);
-    return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b><p>${richText(selectedAlternativeExplanation)}</p></div>` : ''}${q.explanation ? `<div class="full-explanation"><b>Resolução completa</b><p>${richText(q.explanation)}</p></div>` : ''}${complete && !responseIsCorrect(q,answer.response) ? `<label class="error-reason-inline"><span>O que melhor explica esse erro?</span><select data-error-reason data-answer-id="${safeAttr(answer.id)}"><option value="">Selecione o motivo</option><option value="content" ${answer.errorReason==='content'?'selected':''}>Falta de conteúdo</option><option value="interpretation" ${answer.errorReason==='interpretation'?'selected':''}>Interpretação do enunciado</option><option value="calculation" ${answer.errorReason==='calculation'?'selected':''}>Erro de cálculo</option><option value="confusion" ${answer.errorReason==='confusion'?'selected':''}>Confusão conceitual</option><option value="time" ${answer.errorReason==='time'?'selected':''}>Gestão do tempo</option><option value="insecurity" ${answer.errorReason==='insecurity'?'selected':''}>Insegurança na escolha</option><option value="other" ${answer.errorReason==='other'?'selected':''}>Outro motivo</option></select></label>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
+    return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation || selectedAlternativeImages ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b>${selectedAlternativeExplanation ? `<p>${richText(selectedAlternativeExplanation)}</p>` : ''}${selectedAlternativeImages}</div>` : ''}${q.explanation || generalExplanationImages ? `<div class="full-explanation"><b>Resolução completa</b>${q.explanation ? `<p>${richText(q.explanation)}</p>` : ''}${generalExplanationImages}</div>` : ''}${complete && !responseIsCorrect(q,answer.response) ? `<label class="error-reason-inline"><span>O que melhor explica esse erro?</span><select data-error-reason data-answer-id="${safeAttr(answer.id)}"><option value="">Selecione o motivo</option><option value="content" ${answer.errorReason==='content'?'selected':''}>Falta de conteúdo</option><option value="interpretation" ${answer.errorReason==='interpretation'?'selected':''}>Interpretação do enunciado</option><option value="calculation" ${answer.errorReason==='calculation'?'selected':''}>Erro de cálculo</option><option value="confusion" ${answer.errorReason==='confusion'?'selected':''}>Confusão conceitual</option><option value="time" ${answer.errorReason==='time'?'selected':''}>Gestão do tempo</option><option value="insecurity" ${answer.errorReason==='insecurity'?'selected':''}>Insegurança na escolha</option><option value="other" ${answer.errorReason==='other'?'selected':''}>Outro motivo</option></select></label>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
   }).join('')}</div><div class="exam-bottom"><button class="button secondary" data-page="performance">Ver desempenho</button><button class="button primary" data-action="new-activity">Voltar ao gerador</button></div></div>`;
+  unobserveAssetImages($('#activitySession'));
   $('.activity-layout').classList.add('hidden'); $('#pendingTaskSection')?.classList.add('hidden'); $('#savedActivitiesSection')?.classList.add('hidden'); $('#activityNoQuestions').classList.add('hidden'); $('#activitySession').classList.remove('hidden');
+  await hydrateAssetImages($('#activitySession'));
   for (const question of questions) {
     const marks = state.activityAnswers.get(question.id)?.highlights || [];
     applyTextMarks($(`[data-result-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement');
@@ -1571,7 +1605,20 @@ async function openQuestionDetail(id) {
   const afterStemHtml = `${renderQuestionImages(question,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(question,['statement','after_statement'])}${renderQuestionEquations(question,['statement','after_statement'])}`;
   const versionHistory = Array.isArray(question.versionHistory) ? question.versionHistory : [];
   const versionHistoryHtml = versionHistory.length ? `<details class="fine-print" style="margin-top:16px"><summary>Versões anteriores salvas (${versionHistory.length})</summary><div class="issue-list" style="margin-top:10px">${versionHistory.map((version,index)=>`<div class="preview-q"><b>Versão ${index+1} · ${escapeHTML(formatDate(version.archivedAt || version.updatedAt || version.createdAt,true))}</b><p>${escapeHTML(String(version.statement || '').slice(0,220))}${String(version.statement || '').length>220?'…':''}</p><small>${escapeHTML(version.archiveReason || 'Versão anterior')} ${version.replacedByPackage ? `· Pacote: ${escapeHTML(version.replacedByPackage)}` : ''}</small><div class="note-actions"><button class="text-button" data-action="restore-question-version" data-id="${safeAttr(id)}" data-version-index="${index}">Restaurar esta versão</button></div></div>`).join('')}</div></details>` : '';
-  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBase.content)}</div>` : ''}${beforeStemHtml}<div class="exam-stem">${richText(question.statement)}</div>${afterStemHtml}${renderQuestionReferences(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}<div class="answer-feedback correct"><b>Gabarito: ${escapeHTML(answerLabel)}</b>${question.explanation ? `<p>${richText(question.explanation)}</p>` : ''}</div>${question.alternativeExplanations && Object.keys(question.alternativeExplanations).length ? `<h3>Comentários das alternativas</h3>${Object.entries(question.alternativeExplanations).map(([key,value])=>`<p class="fine-print"><b>${escapeHTML(key)}:</b> ${richText(value)}</p>`).join('')}` : ''}${versionHistoryHtml}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
+  const alternativeCommentKeys = new Set([
+    ...Object.keys(question.alternativeExplanations || {}),
+    ...(question.images || []).map(image => String(image.position || '').trim().match(/^(?:alternative[_-]explanation|alternative[_-]comment):(.+)$/i)?.[1]).filter(Boolean)
+  ].map(key => String(key).trim().toUpperCase()));
+  const alternativeCommentsHtml = [...alternativeCommentKeys].sort().map(key => {
+    const comment = getAlternativeExplanationText(question, key);
+    const images = renderAlternativeExplanationImages(question, key);
+    if (!comment && !images) return '';
+    return `<div class="alternative-comment"><b>Alternativa ${escapeHTML(key)}</b>${comment ? `<p>${richText(comment)}</p>` : ''}${images}</div>`;
+  }).join('');
+  const generalExplanationHtml = question.explanation || renderExplanationImages(question)
+    ? `<div class="answer-feedback correct"><b>Resolução completa</b>${question.explanation ? `<p>${richText(question.explanation)}</p>` : ''}${renderExplanationImages(question)}</div>`
+    : `<div class="answer-feedback correct"><b>Gabarito: ${escapeHTML(answerLabel)}</b></div>`;
+  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBase.content)}</div>` : ''}${beforeStemHtml}<div class="exam-stem">${richText(question.statement)}</div>${afterStemHtml}${renderQuestionReferences(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}${generalExplanationHtml}${alternativeCommentsHtml ? `<h3>Comentários das alternativas</h3>${alternativeCommentsHtml}` : ''}${versionHistoryHtml}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
   await hydrateAssetImages($('#modalBody'));
 }
 
@@ -1683,6 +1730,13 @@ function validateDraftQuestion(q, draft) {
   for (const image of q.images || []) {
     if (draft.invalidAssetIds?.includes(image.assetId)) issues.push(`Imagem inválida ou corrompida: ${image.fileName || image.assetId}`);
     else if (!draft.assets.some(item => item.id === image.assetId) && !state.data.assets.some(item => item.id === image.assetId)) issues.push(`Imagem ausente: ${image.fileName || image.assetId}`);
+    const alternativeTarget = String(image.position || '').trim().match(/^(?:alternative[_-]explanation|alternative[_-]comment):(.+)$/i);
+    if (alternativeTarget) {
+      const letter = alternativeTarget[1].trim().toUpperCase();
+      if (q.type !== 'multiple_choice' || !Object.prototype.hasOwnProperty.call(q.alternatives || {}, letter)) {
+        issues.push(`Imagem associada a uma alternativa inexistente: ${letter}`);
+      }
+    }
   }
   return issues;
 }
@@ -2204,7 +2258,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.5.4');
+  await setSetting(state.db, 'appVersion', '1.5.5');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2377,7 +2431,11 @@ async function toggleDimmedOption(questionId, option) {
   syncAnswerCache(next);
   const question = questionById(questionId);
   const container = $(`#options-q-${CSS.escape(questionId)}`);
-  if (container && question) container.outerHTML = renderResponseOptions(question, next.response || '', next, state.currentActivity.config);
+  if (container && question) {
+    container.outerHTML = renderResponseOptions(question, next.response || '', next, state.currentActivity.config);
+    const card = document.querySelector(`[data-question-card="${CSS.escape(questionId)}"]`);
+    if (card) await hydrateAssetImages(card);
+  }
 }
 
 // Event delegation keeps the interface small and allows pages to be redrawn safely.

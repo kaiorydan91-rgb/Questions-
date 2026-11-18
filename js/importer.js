@@ -177,6 +177,13 @@ function validateQuestion(question, index, textBaseIds, assetMap, invalidAssetId
     if (invalidAssetIds.has(image.assetId)) issues.push(`O arquivo vinculado à imagem ${image.assetId} não é uma imagem compatível ou está corrompido.`);
     else if (!image.fileName && !assetMap.has(image.assetId)) issues.push(`A imagem ${image.assetId} não possui arquivo identificado.`);
     else if (!assetMap.has(image.assetId)) issues.push(`Arquivo de imagem ausente: ${image.fileName || image.assetId}.`);
+    const alternativeTarget = String(image.position || '').trim().match(/^(?:alternative[_-]explanation|alternative[_-]comment):(.+)$/i);
+    if (alternativeTarget) {
+      const letter = alternativeTarget[1].trim().toUpperCase();
+      if (question.type !== 'multiple_choice' || !Object.prototype.hasOwnProperty.call(question.alternatives || {}, letter)) {
+        issues.push(`A imagem ${image.assetId} aponta para a explicação da alternativa ${letter}, mas essa alternativa não existe nesta questão.`);
+      }
+    }
   }
   question.incomplete = issues.length > 0;
   question.importIssues = issues;
