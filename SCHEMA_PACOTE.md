@@ -77,8 +77,40 @@ O campo `images` aceita várias referências. `id` identifica o recurso; `file` 
 - `before_statement`
 - `statement` ou `after_statement`
 - `after_text_base`
-- `option:A`, `option:B` etc. (também aceita `alternative:A`)
-- `after_alternatives`. Tabelas e expressões aceitam posições como `after_statement`, `after_text_base` e `after_alternatives`; cada tabela possui `headers`, `rows`, `title` e `caption`, e cada expressão possui `expression`, `label` e `position`.
+- `option:A`, `option:B` etc. (também aceita `alternative:A`) — imagem que faz parte do conteúdo da alternativa.
+- `after_alternatives`
+- `explanation` — imagem da resolução geral, exibida junto ao campo `explanation`.
+- `alternative_explanation:A`, `alternative_explanation:B` etc. — imagem que pertence ao comentário individual da alternativa indicada. Também são aceitos os aliases `alternative-explanation:A`, `alternative_comment:A` e `alternative-comment:A`.
+
+As imagens de resolução geral e de comentários individuais podem coexistir com imagens do enunciado e das alternativas na mesma questão. Todas são declaradas no mesmo array `images` e armazenadas no mesmo ZIP; não crie arrays de imagens separados nem insira base64 no JSON. Uma imagem pode ser usada mesmo quando o respectivo texto de explicação estiver vazio. Na atividade, o comentário de uma alternativa aparece de acordo com as configurações de correção já existentes e fica associado à alternativa selecionada; a resolução geral acompanha as regras atuais de exibição de comentários. Na revisão final e na visualização completa da questão, as imagens são mostradas com seus respectivos comentários.
+
+Exemplo de duas imagens adicionais na mesma questão:
+
+```json
+{
+  "explanation": "Observe o gráfico para comparar os intervalos e justificar o resultado.",
+  "alternativeExplanations": {
+    "B": "A alternativa B confunde a taxa média com a taxa instantânea."
+  },
+  "images": [
+    {
+      "id": "BIO-2026-001-RESOLUCAO-GRAFICO",
+      "file": "imagens/BIO-2026-001-RESOLUCAO-GRAFICO.webp",
+      "position": "explanation",
+      "alt": "Gráfico utilizado na resolução geral",
+      "caption": "Comparação dos dados ao longo do tempo"
+    },
+    {
+      "id": "BIO-2026-001-ALT-B-DIAGRAMA",
+      "file": "imagens/BIO-2026-001-ALT-B-DIAGRAMA.webp",
+      "position": "alternative_explanation:B",
+      "alt": "Diagrama que explica o erro da alternativa B"
+    }
+  ]
+}
+```
+
+Tabelas e expressões aceitam posições como `after_statement`, `after_text_base` e `after_alternatives`; cada tabela possui `headers`, `rows`, `title` e `caption`, e cada expressão possui `expression`, `label` e `position`.
 
 `sourceUrl` (ou `url`/`href`) pode guardar o endereço externo da origem da imagem; ele será mostrado como um link separado da imagem. `kind` pode ser `essential`, `illustrative` ou `shared`. O booleano `essential` indica que o arquivo é necessário para interpretar a questão. Um mesmo identificador pode ser referenciado por várias questões.
 
