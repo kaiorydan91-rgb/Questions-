@@ -2055,12 +2055,18 @@ async function analyzeImport() {
     analyze.disabled = false; analyze.textContent = 'Tentar novamente';
   }
 }
+function hasValidSharedTextBase(q, draft) {
+  if (!q?.textBaseId) return false;
+  const base = (draft?.textBases || []).find(item => item.id === q.textBaseId)
+    || (state.data.textBases || []).find(item => item.id === q.textBaseId);
+  return Boolean(base && (String(base.content || '').trim() || (Array.isArray(base.blocks) && base.blocks.length)));
+}
 function validateDraftQuestion(q, draft) {
   const issues = [];
   if (!(SUBJECTS[q.area] || []).length) issues.push('Área de conhecimento não reconhecida');
   if (!(SUBJECTS[q.area] || []).includes(q.subject)) issues.push('A matéria não corresponde à área selecionada');
   if (!q.primaryTopic) issues.push('Assunto principal não informado');
-  if (!q.statement && !(q.contentBlocks || []).length) issues.push('Enunciado vazio: informe statement ou blocos de conteúdo');
+  if (!q.statement && !(q.contentBlocks || []).length && !hasValidSharedTextBase(q, draft)) issues.push('Enunciado vazio: informe statement, blocos de conteúdo ou um texto-base compartilhado válido');
   if (!q.answer || (typeof q.answer === 'string' && !q.answer.trim())) issues.push('Gabarito ausente');
   if (q.type === 'multiple_choice') {
     const keys = Object.keys(q.alternatives || {});
