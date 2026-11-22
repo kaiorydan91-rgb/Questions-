@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.7.0
+# Grafia Questions — versão 1.7.1
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -185,3 +185,8 @@ A versão 1.6.4 adota a identidade visual Forest Glass aprovada: fundos verde-pr
 - Separa estrutura de dados e apresentação: os blocos são renderizados em uma composição editorial contínua, sem cartões individuais obrigatórios.
 - Restaura a identidade Classic Red Glass, substituindo o tema Forest/Cool Steel por fundos bordô e vermelho profundo com acentos crimson.
 - O reconhecimento de PDFs/OCR por IA não faz parte desta atualização: o importador continua recebendo JSON estruturado e ZIP opcional de imagens.
+
+
+## Atualização 1.7.1 — Textos-base compartilhados
+
+Corrige a validação de questões cujo enunciado é fornecido por um `textBaseId` válido: o importador deixa de marcá-las como incompletas quando o conteúdo compartilhado existe no pacote. Nenhuma alteração no banco de dados é necessária.
