@@ -11,13 +11,53 @@ const str = value => typeof value === 'string' ? value.trim() : (value == null ?
 const makeId = () => `q-${crypto.randomUUID()}`;
 const toArray = value => Array.isArray(value) ? value : (value == null || value === '' ? [] : [value]);
 
+const BLOCK_TYPES = new Set(['paragraph','heading','quote','poem','list','formula','chemistry','table','image','divider','code','callout','command','chart','diagram']);
+function normalizeBlock(block, index = 0) {
+  if (typeof block === 'string') return { id: `block-${index + 1}`, type: 'paragraph', text: block };
+  if (!block || typeof block !== 'object' || Array.isArray(block)) throw new Error(`O bloco de conteúdo ${index + 1} precisa ser um objeto ou texto.`);
+  const type = str(block.type ?? block.kind ?? block.tipo).toLowerCase().replace(/[- ]/g, '_');
+  const normalizedType = ({ text: 'paragraph', text_block: 'paragraph', p: 'paragraph', stanza: 'poem', quotation: 'quote', equation: 'formula', math: 'formula', inline_math: 'formula', reaction: 'chemistry', chemical_formula: 'chemistry', ul: 'list', ol: 'list', bullet_list: 'list', ordered_list: 'list', image: 'image', figure: 'image' })[type] || type || 'paragraph';
+  if (type === 'ol' || type === 'ordered_list') block = { ...block, ordered: true };
+  if (type === 'ul' || type === 'bullet_list') block = { ...block, ordered: false };
+  const result = { ...block, id: str(block.id) || `block-${index + 1}`, type: normalizedType };
+  if (result.text == null && result.content != null && typeof result.content === 'string') result.text = result.content;
+  if (result.text != null) result.text = String(result.text);
+  if (result.stanzas != null) {
+    if (!Array.isArray(result.stanzas)) throw new Error(`As estrofes do bloco ${result.id} precisam ser uma lista.`);
+    result.stanzas = result.stanzas.map(stanza => Array.isArray(stanza) ? stanza.map(String) : (Array.isArray(stanza?.verses) ? stanza.verses.map(String) : [String(stanza?.text ?? stanza?.content ?? '')]));
+  }
+  if (result.items != null && !Array.isArray(result.items)) throw new Error(`Os itens do bloco ${result.id} precisam ser uma lista.`);
+  if (Array.isArray(result.items)) result.items = result.items.map(item => { const next = typeof item === 'object' && item ? { ...item, text: String(item.text ?? item.content ?? '') } : { text: String(item) }; if (next.children != null) next.children = normalizeBlocks(next.children); return next; });
+  if (result.headers != null && !Array.isArray(result.headers)) throw new Error(`Os cabeçalhos da tabela ${result.id} precisam ser uma lista.`);
+  if (result.headerRows != null && (!Array.isArray(result.headerRows) || result.headerRows.some(row => !Array.isArray(row)))) throw new Error(`As linhas de cabeçalho da tabela ${result.id} precisam ser uma lista de listas.`);
+  if (result.rows != null && !Array.isArray(result.rows)) throw new Error(`As linhas da tabela ${result.id} precisam ser uma lista.`);
+  if (Array.isArray(result.headers)) result.headers = result.headers.map(cell => typeof cell === 'object' && cell ? { ...cell, text: String(cell.text ?? cell.content ?? '') } : { text: String(cell) });
+  if (Array.isArray(result.headerRows)) result.headerRows = result.headerRows.map(row => row.map(cell => typeof cell === 'object' && cell ? { ...cell, header: true, text: String(cell.text ?? cell.content ?? '') } : { text: String(cell), header: true }));
+  if (Array.isArray(result.rows)) result.rows = result.rows.map(row => Array.isArray(row) ? row.map(cell => typeof cell === 'object' && cell ? { ...cell, text: String(cell.text ?? cell.content ?? '') } : { text: String(cell) }) : []);
+  if (result.children != null) { if (!Array.isArray(result.children)) throw new Error(`Os elementos filhos do bloco ${result.id} precisam ser uma lista.`); result.children = normalizeBlocks(result.children); }
+  return result;
+}
+function normalizeBlocks(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new Error('O conteúdo estruturado precisa ser uma lista de blocos.');
+  return value.map(normalizeBlock);
+}
+function blockPlainText(blocks) {
+  return (blocks || []).map(block => [block.text, ...(block.stanzas || []).flat(), ...(block.items || []).map(item => item.text), ...(block.children ? [blockPlainText(block.children)] : [])].filter(Boolean).join(' ')).join(' ').trim();
+}
+function normalizeAlternativeBlocks(raw) {
+  const source = raw?.alternatives ?? raw?.options ?? raw?.alternativas;
+  const entries = Array.isArray(source) ? source.map((value, index) => [LETTERS[index] || `O${index + 1}`, value]) : Object.entries(source || {});
+  return Object.fromEntries(entries.filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value) && Array.isArray(value.content ?? value.blocks)).map(([key, value]) => [String(key).toUpperCase(), normalizeBlocks(value.content ?? value.blocks)]));
+}
+
 export function normalizeSearch(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR').replace(/\s+/g, ' ').trim();
 }
 
 function normalizeOptions(raw) {
-  if (Array.isArray(raw)) return Object.fromEntries(raw.map((item, index) => [LETTERS[index] || `O${index + 1}`, typeof item === 'string' ? item : str(item.text ?? item.statement)]));
-  if (raw && typeof raw === 'object') return Object.fromEntries(Object.entries(raw).map(([key, value]) => [String(key).toUpperCase(), typeof value === 'string' ? value : str(value?.text ?? value?.statement)]));
+  if (Array.isArray(raw)) return Object.fromEntries(raw.map((item, index) => [LETTERS[index] || `O${index + 1}`, typeof item === 'string' ? item : str(item?.text ?? item?.statement ?? (Array.isArray(item?.content ?? item?.blocks) ? blockPlainText(normalizeBlocks(item.content ?? item.blocks)) : ''))]));
+  if (raw && typeof raw === 'object') return Object.fromEntries(Object.entries(raw).map(([key, value]) => [String(key).toUpperCase(), typeof value === 'string' ? value : str(value?.text ?? value?.statement ?? (Array.isArray(value?.content ?? value?.blocks) ? blockPlainText(normalizeBlocks(value.content ?? value.blocks)) : ''))]));
   return {};
 }
 
@@ -35,6 +75,15 @@ function normalizeQuestion(raw, packageMeta = {}) {
     : ['assertion_set', 'multiple_assertions', 'afirmacoes', 'assercoes'].includes(rawType) ? 'assertion_set'
       : 'multiple_choice';
   const options = normalizeOptions(raw.alternatives ?? raw.options ?? raw.alternativas);
+  const contentBlocks = normalizeBlocks(raw.content ?? raw.contentBlocks ?? raw.blocks ?? raw.body);
+  const commandRaw = raw.command ?? raw.comando ?? null;
+  const commandPayload = typeof commandRaw === 'string'
+    ? [{ type: 'paragraph', text: commandRaw }]
+    : (Array.isArray(commandRaw) ? commandRaw
+      : (typeof commandRaw?.content === 'string' ? [{ type: commandRaw.type || 'paragraph', text: commandRaw.content }]
+        : (commandRaw?.content ?? commandRaw?.blocks ?? (commandRaw?.text ? [{ type: commandRaw.type || 'paragraph', text: commandRaw.text }] : []))));
+  const commandBlocks = normalizeBlocks(commandPayload);
+  const alternativeContent = raw.alternativeContent && typeof raw.alternativeContent === 'object' ? Object.fromEntries(Object.entries(raw.alternativeContent).map(([key, blocks]) => [String(key).toUpperCase(), normalizeBlocks(blocks)])) : normalizeAlternativeBlocks(raw);
   const statements = Array.isArray(raw.statements ?? raw.assertions ?? raw.afirmacoes)
     ? (raw.statements ?? raw.assertions ?? raw.afirmacoes).map((item, index) => ({ id: str(item.id) || `S${index + 1}`, text: str(typeof item === 'string' ? item : item.text ?? item.statement), answer: str(item.answer ?? item.gabarito).toUpperCase() })) : [];
   let answer = raw.answer ?? raw.correctAnswer ?? raw.gabarito ?? raw.correct ?? '';
@@ -74,7 +123,7 @@ function normalizeQuestion(raw, packageMeta = {}) {
     skills: toArray(raw.skills ?? raw.habilidades).map(str).filter(Boolean),
     difficulty: ['Fácil', 'Média', 'Difícil'].includes(difficulty) ? difficulty : (difficulty ? difficulty[0].toUpperCase() + difficulty.slice(1).toLowerCase() : ''),
     type, statement: str(raw.statement ?? raw.stem ?? raw.enunciado ?? raw.question),
-    alternatives: options, statements,
+    contentBlocks, commandBlocks, alternativeContent, alternatives: options, statements,
     answer,
     explanation: str(raw.explanation ?? raw.resolution ?? raw.resolucao ?? raw.resoluçãoComentada),
     alternativeExplanations: normalizeExplanationMap(raw.alternativeExplanations ?? raw.explanationsByAlternative ?? raw.comentariosAlternativas),
@@ -98,13 +147,13 @@ function questionSignature(question) {
   const opts = Object.entries(question.alternatives || {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${normalizeSearch(v)}`).join('|');
   const images = (question.images || []).map(image => image.assetId).sort().join('|');
   const statements = (question.statements || []).map(item => normalizeSearch(item.text)).join('|');
-  return `${question.type}::${normalizeSearch(question.statement)}::${opts}::${statements}::${normalizeSearch(question.textBaseId)}::${images}`;
+  return `${question.type}::${normalizeSearch(question.statement)}::${JSON.stringify(question.contentBlocks || [])}::${opts}::${JSON.stringify(question.alternativeContent || {})}::${statements}::${normalizeSearch(question.textBaseId)}::${images}`;
 }
 
 function questionCoreSignature(question) {
   const opts = Object.entries(question.alternatives || {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${normalizeSearch(v)}`).join('|');
   const statements = (question.statements || []).map(item => normalizeSearch(item.text)).join('|');
-  return `${question.type}::${normalizeSearch(question.statement)}::${opts}::${statements}`;
+  return `${question.type}::${normalizeSearch(question.statement)}::${JSON.stringify(question.contentBlocks || [])}::${opts}::${JSON.stringify(question.alternativeContent || {})}::${statements}`;
 }
 
 function countQuestionInformation(question) {
@@ -116,6 +165,7 @@ function countQuestionInformation(question) {
   for (const field of ['secondaryTopics', 'relatedSubjects', 'subtopics', 'prerequisites', 'skills', 'errorCategories', 'statements', 'images', 'tables', 'equations', 'links']) {
     count += Array.isArray(question[field]) ? question[field].length : 0;
   }
+  count += (question.contentBlocks || []).length + (question.commandBlocks || []).length + Object.keys(question.alternativeContent || {}).length;
   count += Object.keys(question.alternatives || {}).length;
   count += Object.keys(question.alternativeExplanations || {}).length;
   return count;
@@ -158,7 +208,21 @@ function validateQuestion(question, index, textBaseIds, assetMap, invalidAssetId
   else if (!SUBJECT_AREA[question.subject]) issues.push(`Matéria não reconhecida: ${question.subject}.`);
   else if (question.area && SUBJECT_AREA[question.subject] !== question.area) issues.push(`A matéria ${question.subject} pertence à área ${SUBJECT_AREA[question.subject]}, não a ${question.area}.`);
   if (!question.primaryTopic) issues.push('Assunto principal não informado.');
-  if (!question.statement) issues.push('Enunciado vazio.');
+  if (!question.statement && !(question.contentBlocks || []).length) issues.push('Enunciado vazio: informe statement ou content com blocos.');
+  const validateBlocks = (blocks, location) => {
+    for (const block of blocks || []) {
+      if (!BLOCK_TYPES.has(block.type)) issues.push(`Tipo de bloco não reconhecido em ${location}: ${block.type} (${block.id}). O conteúdo original foi preservado, mas precisa de revisão.`);
+      if (['image','diagram','chart'].includes(block.type) && !(question.images || []).some(image => image.assetId === String(block.assetId ?? block.imageId ?? ''))) issues.push(`O bloco de imagem ${block.id} em ${location} não aponta para uma imagem declarada em images[].`);
+      validateBlocks(block.children || [], location);
+      for (const item of block.items || []) validateBlocks(item.children || [], location);
+    }
+  };
+  validateBlocks(question.contentBlocks, 'enunciado');
+  validateBlocks(question.commandBlocks, 'comando');
+  for (const [key, blocks] of Object.entries(question.alternativeContent || {})) {
+    if (!Object.prototype.hasOwnProperty.call(question.alternatives || {}, key)) issues.push(`Há conteúdo estruturado associado à alternativa ${key}, mas essa alternativa não existe.`);
+    validateBlocks(blocks, `alternativa ${key}`);
+  }
   if (!question.answer || (typeof question.answer === 'string' && !question.answer.trim())) issues.push('Gabarito não informado.');
   if (question.type === 'multiple_choice') {
     const keys = Object.keys(question.alternatives);
@@ -211,7 +275,7 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
   let pkg;
   try { pkg = JSON.parse(rawText); } catch { throw new Error('O arquivo de questões não contém JSON válido.'); }
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) throw new Error('A estrutura do arquivo precisa ser um objeto JSON.');
-  if (!['1.0', '1.0.0'].includes(String(pkg.schemaVersion ?? pkg.schema_version ?? ''))) throw new Error('Versão de pacote não suportada. Use schemaVersion "1.0.0".');
+  if (!['1.0', '1.0.0', '2.0', '2.0.0'].includes(String(pkg.schemaVersion ?? pkg.schema_version ?? ''))) throw new Error('Versão de pacote não suportada. Use schemaVersion "1.0.0" ou "2.0.0".');
   if (!str(pkg.packageId ?? pkg.package_id)) throw new Error('O pacote precisa de um packageId estável para permitir identificação e retomada da importação.');
   if (!Array.isArray(pkg.questions)) throw new Error('O pacote precisa conter uma lista "questions".');
   if (pkg.questions.length === 0) throw new Error('O pacote não contém questões. Adicione pelo menos uma questão antes de importar.');
@@ -233,7 +297,8 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
       ['images', raw.images ?? raw.imagens ?? raw.assets, false],
       ['statements', raw.statements ?? raw.assertions ?? raw.afirmacoes, true],
       ['tables', raw.tables ?? raw.tabelas, false],
-      ['equations', raw.equations ?? raw.formulas, false]
+      ['equations', raw.equations ?? raw.formulas, false],
+      ['content', raw.content ?? raw.contentBlocks ?? raw.blocks ?? raw.body, false]
     ];
     for (const [field, value, allowText] of listFields) {
       if (value == null) continue;
@@ -256,15 +321,15 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
   const textBasesRaw = pkg.textBases ?? pkg.text_bases ?? pkg.textosBase ?? [];
   if (!Array.isArray(textBasesRaw)) throw new Error('A lista textBases precisa ser um array.');
   if (textBasesRaw.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw new Error('Há um texto-base que não está em um formato de objeto válido.');
-  let textBases = textBasesRaw.map(item => ({ id: str(item.id), title: str(item.title ?? item.titulo), content: str(item.content ?? item.text ?? item.conteudo), source: item.source && typeof item.source === 'object' && Object.keys(item.source).length ? item.source : packageMeta.source, updatedAt: new Date().toISOString() }));
-  if (textBases.some(item => !item.id || !item.content)) throw new Error('Há um texto-base sem identificador ou conteúdo.');
+  let textBases = textBasesRaw.map(item => ({ id: str(item.id), title: str(item.title ?? item.titulo), content: str(typeof item.content === 'string' ? item.content : item.text ?? item.conteudo), blocks: normalizeBlocks(item.blocks ?? item.contentBlocks ?? (Array.isArray(item.content) ? item.content : null)), source: item.source && typeof item.source === 'object' && Object.keys(item.source).length ? item.source : packageMeta.source, updatedAt: new Date().toISOString() }));
+  if (textBases.some(item => !item.id || (!item.content && !item.blocks.length))) throw new Error('Há um texto-base sem identificador ou conteúdo.');
   const initialTextBaseIds = new Set(textBases.map(item => item.id));
   if (initialTextBaseIds.size !== textBases.length) throw new Error('Há identificadores repetidos na lista de textos-base do pacote.');
   const existingTextBases = await getAll(db, 'textBases');
   const existingTextBaseMap = new Map(existingTextBases.map(item => [item.id, item]));
   for (const item of textBases) {
     const existing = existingTextBaseMap.get(item.id);
-    if (existing && (normalizeSearch(existing.content) !== normalizeSearch(item.content) || normalizeSearch(existing.title) !== normalizeSearch(item.title))) {
+    if (existing && (normalizeSearch(existing.content) !== normalizeSearch(item.content) || JSON.stringify(existing.blocks || []) !== JSON.stringify(item.blocks || []) || normalizeSearch(existing.title) !== normalizeSearch(item.title))) {
       throw new Error(`O texto-base ${item.id} já existe com conteúdo diferente. Use outro ID ou resolva o conflito antes de importar, para evitar sobrescrever o texto existente.`);
     }
   }
@@ -317,7 +382,7 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
   const textBaseIds = new Set([...textBases.map(item => item.id), ...existingTextBaseMap.keys()]);
   for (const item of textBases) {
     const existing = existingTextBaseMap.get(item.id);
-    if (existing && (normalizeSearch(existing.content) !== normalizeSearch(item.content) || normalizeSearch(existing.title) !== normalizeSearch(item.title))) {
+    if (existing && (normalizeSearch(existing.content) !== normalizeSearch(item.content) || JSON.stringify(existing.blocks || []) !== JSON.stringify(item.blocks || []) || normalizeSearch(existing.title) !== normalizeSearch(item.title))) {
       throw new Error(`O texto-base ${item.id} já existe com conteúdo diferente. Use outro ID ou resolva o conflito antes de importar, para evitar sobrescrever o texto existente.`);
     }
   }
@@ -386,7 +451,7 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     return matches.length === 1 ? matches[0] : null;
   };
   for (const existing of currentQuestions) {
-    if (!existing.statement) continue;
+    if (!existing.statement && !(existing.contentBlocks || []).length) continue;
     addCandidate(signatureMap, questionSignature(existing), existing);
     addCandidate(coreSignatureMap, questionCoreSignature(existing), existing);
   }
@@ -397,8 +462,9 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     if (directMatch && questionCoreSignature(directMatch) !== questionCoreSignature(question)) {
       throw new Error(`O ID ${question.id} já existe no banco, mas o enunciado ou as alternativas são diferentes. Para evitar mesclar questões distintas, gere um ID globalmente único para esta questão e tente novamente.`);
     }
-    const exactMatch = question.statement ? uniqueCandidate(signatureMap, questionSignature(question)) : null;
-    const contentMatch = question.statement ? uniqueCandidate(coreSignatureMap, questionCoreSignature(question)) : null;
+    const hasIncomingContent = Boolean(question.statement || question.contentBlocks?.length);
+    const exactMatch = hasIncomingContent ? uniqueCandidate(signatureMap, questionSignature(question)) : null;
+    const contentMatch = hasIncomingContent ? uniqueCandidate(coreSignatureMap, questionCoreSignature(question)) : null;
     const match = directMatch || exactMatch || contentMatch;
     if (match) {
       const matchType = directMatch ? 'id' : exactMatch ? 'exact' : 'content';
@@ -434,6 +500,10 @@ export function mergeQuestion(existing, incoming) {
   const scalarFields = ['area', 'subject', 'primaryTopic', 'difficulty', 'statement', 'explanation', 'textBaseId'];
   for (const field of scalarFields) if (!merged[field] && incoming[field]) merged[field] = incoming[field];
   for (const field of ['secondaryTopics', 'relatedSubjects', 'subtopics', 'prerequisites', 'skills', 'errorCategories']) merged[field] = [...new Set([...(merged[field] || []), ...(incoming[field] || [])])];
+  if ((!merged.contentBlocks || !merged.contentBlocks.length) && incoming.contentBlocks?.length) merged.contentBlocks = incoming.contentBlocks;
+  if ((!merged.commandBlocks || !merged.commandBlocks.length) && incoming.commandBlocks?.length) merged.commandBlocks = incoming.commandBlocks;
+  merged.alternativeContent = { ...(existing.alternativeContent || {}) };
+  for (const [key, blocks] of Object.entries(incoming.alternativeContent || {})) if (!merged.alternativeContent[key]?.length) merged.alternativeContent[key] = blocks;
   merged.alternatives = { ...(existing.alternatives || {}) };
   for (const [key, value] of Object.entries(incoming.alternatives || {})) if (!merged.alternatives[key]) merged.alternatives[key] = value;
   merged.alternativeExplanations = { ...(existing.alternativeExplanations || {}) };

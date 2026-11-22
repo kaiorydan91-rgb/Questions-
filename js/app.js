@@ -76,7 +76,7 @@ function linkifyText(value) {
   });
 }
 function richText(value) {
-  return linkifyText(value).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>').replace(/\n/g, '<br>');
+  return linkifyText(value).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>').replace(/\\\((.+?)\\\)/g, (_match, latex) => `<span class=\"inline-math\">${readableLatex(latex)}</span>`).replace(/\$([^$\n]+)\$/g, (_match, latex) => `<span class=\"inline-math\">${readableLatex(latex)}</span>`).replace(/\n/g, '<br>');
 }
 function questionStatementHTML(value) {
   // The label "Comando" should read as ordinary text, not as a highlighted heading.
@@ -310,7 +310,7 @@ function renderBank() {
     $('#bankPagination').innerHTML = '';
     return;
   }
-  $('#bankList').innerHTML = visible.map(q => `<article class="question-row"><div class="question-number">${escapeHTML(String(q.sourceQuestionNumber || '•'))}</div><div><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${escapeHTML(q.primaryTopic || 'Sem assunto')}</span><span class="tag">${escapeHTML(q.difficulty || 'Sem nível')}</span>${hasExplanationContent(q) ? '<span class="tag">Comentada</span>' : '<span class="tag">Gabarito</span>'}${q.images?.length ? '<span class="tag">Imagem</span>' : ''}${(q.relatedSubjects||[]).map(item=>`<span class="tag">Interdisciplinar: ${escapeHTML(item)}</span>`).join('')}${q.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(q.classificationConfidence*100)}% confiança</span>` : ''}</div><h3>${escapeHTML(q.id)}</h3><p>${richText(q.statement)}</p>${renderQuestionReferences(q)}</div><div class="row-actions"><button class="icon-action ${q.favorite ? 'active' : ''}" data-action="favorite" data-id="${safeAttr(q.id)}" title="${q.favorite ? 'Remover favorita' : 'Favoritar'}">${q.favorite ? '★' : '☆'}</button><button class="icon-action" data-open-question="${safeAttr(q.id)}" title="Abrir questão">↗</button></div></article>`).join('');
+  $('#bankList').innerHTML = visible.map(q => `<article class="question-row"><div class="question-number">${escapeHTML(String(q.sourceQuestionNumber || '•'))}</div><div><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${escapeHTML(q.primaryTopic || 'Sem assunto')}</span><span class="tag">${escapeHTML(q.difficulty || 'Sem nível')}</span>${hasExplanationContent(q) ? '<span class="tag">Comentada</span>' : '<span class="tag">Gabarito</span>'}${q.images?.length ? '<span class="tag">Imagem</span>' : ''}${(q.relatedSubjects||[]).map(item=>`<span class="tag">Interdisciplinar: ${escapeHTML(item)}</span>`).join('')}${q.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(q.classificationConfidence*100)}% confiança</span>` : ''}</div><h3>${escapeHTML(q.id)}</h3><p>${q.contentBlocks?.length ? escapeHTML((q.contentBlocks.map(block=>block.text || (block.stanzas || []).flat().join(' ')).join(' ')).slice(0,220)) : richText(q.statement)}</p>${renderQuestionReferences(q)}</div><div class="row-actions"><button class="icon-action ${q.favorite ? 'active' : ''}" data-action="favorite" data-id="${safeAttr(q.id)}" title="${q.favorite ? 'Remover favorita' : 'Favoritar'}">${q.favorite ? '★' : '☆'}</button><button class="icon-action" data-open-question="${safeAttr(q.id)}" title="Abrir questão">↗</button></div></article>`).join('');
   $('#bankPagination').innerHTML = pageCount > 1 ? `<span class="fine-print">Página ${state.bankPage} de ${pageCount}</span><div class="pagination-actions"><button class="button secondary" data-bank-page="${Math.max(1,state.bankPage-1)}" ${state.bankPage===1?'disabled':''}>Anterior</button><button class="button secondary" data-bank-page="${Math.min(pageCount,state.bankPage+1)}" ${state.bankPage===pageCount?'disabled':''}>Próxima</button></div>` : '';
 }
 
@@ -856,6 +856,116 @@ function renderQuestionEquations(question, positions = ['after_statement']) {
   return selected.map(item => `<div class="formula-panel">${item.label ? `<small>${escapeHTML(item.label)}</small>` : ''}<div>${escapeHTML(item.expression)}</div></div>`).join('');
 }
 
+const MATHML_TAGS = new Set(['math','mrow','mi','mn','mo','msup','msub','msubsup','mfrac','msqrt','mroot','mtext','mtable','mtr','mtd','mover','munder','munderover','mspace','mfenced','semantics','annotation']);
+const MATHML_ATTRS = new Set(['display','mathvariant','stretchy','fence','separator','accent','accentunder','width','height','depth','columnalign','rowalign','rowspan','columnspan','linethickness','notation','encoding','displaystyle','scriptlevel']);
+function safeMathML(source) {
+  try {
+    const doc = new DOMParser().parseFromString(String(source || ''), 'application/xml');
+    if (doc.querySelector('parsererror') || !doc.documentElement || doc.documentElement.localName !== 'math') return '';
+    const clean = node => {
+      if (node.nodeType === Node.TEXT_NODE) return escapeHTML(node.nodeValue || '');
+      if (node.nodeType !== Node.ELEMENT_NODE || !MATHML_TAGS.has(node.localName)) return [...node.childNodes].map(clean).join('');
+      const attrs = [...node.attributes].filter(attr => MATHML_ATTRS.has(attr.name.toLowerCase())).map(attr => ` ${attr.name.toLowerCase()}="${safeAttr(attr.value)}"`).join('');
+      return `<${node.localName}${attrs}>${[...node.childNodes].map(clean).join('')}</${node.localName}>`;
+    };
+    return clean(doc.documentElement);
+  } catch { return ''; }
+}
+function readableLatex(source) {
+  let value = escapeHTML(String(source || ''));
+  value = value.replace(/\\(?:mathrm|text|mathbf|operatorname)\{([^{}]*)\}/g, '$1').replace(/\\left|\\right/g, '');
+  value = value.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '<span class="math-fraction"><span>$1</span><span>$2</span></span>');
+  value = value.replace(/\\sqrt\{([^{}]+)\}/g, '√<span class="math-radicand">$1</span>');
+  const symbols = { '\\times':'×','\\cdot':'·','\\div':'÷','\\pm':'±','\\leq':'≤','\\geq':'≥','\\neq':'≠','\\approx':'≈','\\pi':'π','\\theta':'θ','\\alpha':'α','\\beta':'β','\\Delta':'Δ','\\rightarrow':'→','\\infty':'∞','\\sum':'∑','\\int':'∫' };
+  for (const [from,to] of Object.entries(symbols)) value = value.split(from).join(to);
+  value = value.replace(/([_^])\{([^{}]+)\}/g, (_m, kind, content) => `<${kind === '_' ? 'sub' : 'sup'}>${content}</${kind === '_' ? 'sub' : 'sup'}>`).replace(/\^([0-9+-])/g,'<sup>$1</sup>').replace(/_([0-9])/g,'<sub>$1</sub>');
+  return value;
+}
+function renderChemicalFormula(value) {
+  let text = escapeHTML(String(value || ''));
+  text = text.replace(/\^\{([^{}]+)\}/g, '<sup>$1</sup>').replace(/_\{([^{}]+)\}/g, '<sub>$1</sub>');
+  text = text.replace(/([A-Za-z)])([0-9]+)/g, '$1<sub>$2</sub>');
+  return text;
+}
+function renderBlockTable(block) {
+  const cell = item => { const value = typeof item === 'object' && item ? item : { text: item }; const tag = value.header ? 'th' : 'td'; return `<${tag}${Number(value.colSpan || value.colspan) > 1 ? ` colspan="${Math.min(20, Number(value.colSpan || value.colspan))}"` : ''}${Number(value.rowSpan || value.rowspan) > 1 ? ` rowspan="${Math.min(20, Number(value.rowSpan || value.rowspan))}"` : ''}>${richText(value.text ?? value.content ?? '')}</${tag}>`; };
+  const headRows = block.headerRows?.length ? block.headerRows : ((block.headers || []).length ? [block.headers] : []);
+  const headers = headRows.length ? `<thead>${headRows.map(row => `<tr>${row.map(item => cell({ ...(typeof item === 'object' ? item : { text: item }), header: true })).join('')}</tr>`).join('')}</thead>` : '';
+  const rows = (block.rows || []).map(row => `<tr>${row.map(cell).join('')}</tr>`).join('');
+  return `<figure class="question-table-block">${block.title ? `<figcaption class="table-title">${richText(block.title)}</figcaption>` : ''}<div class="question-table-scroll"><table class="question-table">${headers}<tbody>${rows}</tbody></table></div>${block.caption ? `<figcaption>${richText(block.caption)}</figcaption>` : ''}</figure>`;
+}
+function renderContentBlocks(question, blocks = []) {
+  return (blocks || []).map((block, index) => {
+    const type = String(block.type || 'paragraph').toLowerCase();
+    const text = String(block.text ?? block.content ?? '');
+    const id = safeAttr(block.id || `content-${index + 1}`);
+    const align = ['left','right','center','justify'].includes(String(block.align || '').toLowerCase()) ? ` q-align-${String(block.align).toLowerCase()}` : '';
+    if (type === 'paragraph') return `<p class="q-block q-paragraph${align}" data-block-id="${id}">${richText(text)}</p>`;
+    if (type === 'heading') return `<h4 class="q-block q-heading${align}" data-block-id="${id}">${richText(text)}</h4>`;
+    if (type === 'quote') return `<blockquote class="q-block q-quote${align}" data-block-id="${id}">${richText(text)}</blockquote>`;
+    if (type === 'poem') return `<div class="q-block q-poem${align}" data-block-id="${id}">${(block.stanzas || []).map(stanza => `<p class="q-stanza">${stanza.map(verse => `<span>${richText(verse)}</span>`).join('')}</p>`).join('')}</div>`;
+    if (type === 'list') { const tag = block.ordered || block.listType === 'ordered' || block.listType === 'numbered' ? 'ol' : 'ul'; return `<${tag} class="q-block q-list" data-block-id="${id}">${(block.items || []).map(item => `<li>${richText(item.text ?? '')}${item.children?.length ? renderContentBlocks(question, item.children) : ''}</li>`).join('')}</${tag}>`; }
+    if (type === 'formula') { const mathml = block.mathml ? safeMathML(block.mathml) : ''; const formula = mathml || `<span class="math-readable">${readableLatex(block.latex ?? block.expression ?? text)}</span>`; return `<div class="q-block q-formula" data-block-id="${id}">${block.label ? `<small>${escapeHTML(block.label)}</small>` : ''}<div class="q-formula-content">${formula}</div></div>`; }
+    if (type === 'chemistry') return `<div class="q-block q-chemistry" data-block-id="${id}">${block.label ? `<small>${escapeHTML(block.label)}</small>` : ''}<div>${block.mathml ? (safeMathML(block.mathml) || renderChemicalFormula(block.formula ?? text)) : renderChemicalFormula(block.formula ?? text)}</div></div>`;
+    if (type === 'table') return renderBlockTable(block);
+    if (type === 'image' || type === 'diagram' || type === 'chart') { const ref = String(block.assetId ?? block.imageId ?? ''); const image = (question.images || []).find(item => item.assetId === ref); return image ? `<div class="q-block q-inline-figure">${renderSingleImage(question, image)}</div>` : `<div class="q-block q-missing-figure">Imagem não vinculada: ${escapeHTML(ref || block.alt || 'sem identificador')}</div>`; }
+    if (type === 'divider') return '<hr class="q-block q-divider">';
+    if (type === 'code') return `<pre class="q-block q-code"><code>${escapeHTML(text)}</code></pre>`;
+    if (type === 'callout') return `<aside class="q-block q-callout">${richText(text)}</aside>`;
+    if (type === 'command') return `<div class="q-command-flow">${renderContentBlocks(question, block.children?.length ? block.children : [{ type: 'paragraph', text }])}</div>`;
+    return `<p class="q-block q-unknown" data-block-id="${id}">${richText(text || JSON.stringify(block))}</p>`;
+  }).join('');
+}
+function renderQuestionBodyContent(question) {
+  const body = question.contentBlocks?.length ? renderContentBlocks(question, question.contentBlocks) : questionStatementHTML(question.statement);
+  const command = question.commandBlocks?.length ? `<div class=\"q-command-flow\">${renderContentBlocks(question, question.commandBlocks)}</div>` : '';
+  return `${body}${command}`;
+}
+function renderQuestionComposition(question) {
+  if (question.contentBlocks?.length) {
+    const allStructuredBlocks = [
+      ...(question.contentBlocks || []),
+      ...(question.commandBlocks || []),
+      ...Object.values(question.alternativeContent || {}).flat()
+    ];
+    const usedAssets = new Set(allStructuredBlocks
+      .filter(block => ['image','diagram','chart'].includes(String(block.type || '').toLowerCase()))
+      .map(block => String(block.assetId ?? block.imageId ?? '')));
+    const looseImages = (question.images || []).filter(image => {
+      const position = String(image.position || '');
+      const belongsToOtherRegion = /^(?:alternative[_-]explanation|alternative[_-]comment|option|alternative|alternativa):/i.test(position);
+      return !usedAssets.has(String(image.assetId)) && !belongsToOtherRegion;
+    });
+    const legacyMedia = looseImages.map(image => renderSingleImage(question, image)).join('');
+    const legacyTables = renderQuestionTables(question, ['after_statement','statement']);
+    const legacyEquations = renderQuestionEquations(question, ['after_statement','statement']);
+    return `<div class="exam-stem question-composition" data-statement-for="${safeAttr(question.id)}">${renderQuestionBodyContent(question)}${legacyMedia}${legacyTables}${legacyEquations}</div>${renderQuestionReferences(question)}`;
+  }
+  const before = `${renderQuestionImages(question,['after_text_base','after-text-base'])}${renderQuestionTables(question,['after_text_base','after-text-base'])}${renderQuestionEquations(question,['after_text_base','after-text-base'])}${renderQuestionImages(question,['before_statement','before-statement'])}`;
+  const after = `${renderQuestionImages(question,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(question,['statement','after_statement'])}${renderQuestionEquations(question,['statement','after_statement'])}`;
+  return `${before}<div class="exam-stem" data-statement-for="${safeAttr(question.id)}">${renderQuestionBodyContent(question)}</div>${after}${renderQuestionReferences(question)}`;
+}
+function renderOptionContent(question, key, value) {
+  const blocks = question.alternativeContent?.[String(key).toUpperCase()];
+  return blocks?.length ? renderContentBlocks(question, blocks) : `${richText(value)}${renderOptionImages(question,key)}`;
+}
+function getAlternativeAnswerLabel(question, key) {
+  const plain = question.alternatives?.[key];
+  if (plain) return plain;
+  const blocks = question.alternativeContent?.[String(key).toUpperCase()] || [];
+  const fragments = blocks.map(block => {
+    const type = String(block.type || '').toLowerCase();
+    if (type === 'poem') return (block.stanzas || []).flat().join(' / ');
+    if (type === 'list') return (block.items || []).map(item => item.text || '').filter(Boolean).join('; ');
+    return block.text ?? block.content ?? block.latex ?? block.expression ?? block.formula ?? block.label ?? '';
+  }).map(value => String(value).trim()).filter(Boolean);
+  return fragments.join(' · ') || (blocks.length ? 'Conteúdo visual ou estruturado' : '');
+}
+function renderTextBaseContent(textBase, relatedQuestions = []) {
+  if (textBase?.blocks?.length) return renderContentBlocks({ images: [] }, textBase.blocks);
+  return richText(textBaseDisplayContent(textBase, relatedQuestions));
+}
+
 function renderResponseOptions(question, current = '', answerRecord = {}, config = null, final = false) {
   if (question.type === 'true_false') {
     return `<div class="answer-options" id="options-q-${safeAttr(question.id)}">${[['V','Verdadeiro'],['F','Falso']].map(([value,label]) => `<label class="answer-option"><input type="radio" name="answer-${safeAttr(question.id)}" value="${value}" ${current === value ? 'checked' : ''}><span><b>${value}</b> — ${label}</span></label>`).join('')}</div>`;
@@ -875,7 +985,7 @@ function renderResponseOptions(question, current = '', answerRecord = {}, config
     const specificComment = selected && canShowComment && isComplete ? getAlternativeExplanationText(question, key) : '';
     const specificImages = selected && canShowComment && isComplete ? renderAlternativeExplanationImages(question, key) : '';
     const hasSpecificComment = Boolean(specificComment || specificImages);
-    return `<div class="answer-option-row"><label class="answer-option ${isDimmed ? 'dimmed' : ''}" data-hold-option="${safeAttr(key)}" data-question-option="${safeAttr(question.id)}" aria-label="Alternativa ${escapeHTML(key)}"><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${selected ? 'checked' : ''}><span class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</span></label>${hasSpecificComment ? `<div class="alternative-comment ${isCorrect ? 'correct' : 'wrong'}"><b>${isCorrect ? 'Comentário da alternativa marcada' : `Por que a alternativa ${escapeHTML(key)} está incorreta`}</b>${specificComment ? `<p>${richText(specificComment)}</p>` : ''}${specificImages}</div>` : ''}</div>`;
+    return `<div class="answer-option-row"><label class="answer-option ${isDimmed ? 'dimmed' : ''}" data-hold-option="${safeAttr(key)}" data-question-option="${safeAttr(question.id)}" aria-label="Alternativa ${escapeHTML(key)}"><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${selected ? 'checked' : ''}><span class="option-content"><b>${escapeHTML(key)})</b> ${renderOptionContent(question,key,value)}</span></label>${hasSpecificComment ? `<div class="alternative-comment ${isCorrect ? 'correct' : 'wrong'}"><b>${isCorrect ? 'Comentário da alternativa marcada' : `Por que a alternativa ${escapeHTML(key)} está incorreta`}</b>${specificComment ? `<p>${richText(specificComment)}</p>` : ''}${specificImages}</div>` : ''}</div>`;
   }).join('')}</div>`;
 }
 
@@ -888,7 +998,7 @@ function renderQuestionFeedback(question, answer, config, final = false) {
   if (!reveal && !hasExplanation) return '';
   const correct = responseIsCorrect(question, answer.response);
   const expected = getExpectedAnswer(question);
-  const answerLabel = question.type === 'multiple_choice' ? `${expected}) ${question.alternatives?.[expected] || ''}` : expected;
+  const answerLabel = question.type === 'multiple_choice' ? `${expected}) ${getAlternativeAnswerLabel(question, expected)}` : expected;
   const kind = correct ? 'correct' : 'wrong';
   const explanation = showComment ? `${question.explanation ? `<p>${richText(question.explanation)}</p>` : ''}${explanationImages}` : '';
   if (!reveal && !explanation) return '';
@@ -983,11 +1093,11 @@ function renderActivityQuestionCard(q, index, options = {}) {
   const textBase = options.textBase || null;
   const showBase = Boolean(options.showBase && textBase);
   const baseId = textBase?.id || '';
-  const baseHtml = showBase ? `<div class="base-text" id="exam-base-${safeAttr(baseId)}"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-textbase-for="${safeAttr(q.id)}">${richText(textBaseDisplayContent(textBase, options.baseQuestions || [q]))}</div></div>` : '';
+  const baseHtml = showBase ? `<div class="base-text" id="exam-base-${safeAttr(baseId)}"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-textbase-for="${safeAttr(q.id)}">${renderTextBaseContent(textBase, options.baseQuestions || [q])}</div></div>` : '';
   const returnToBase = textBase && !showBase ? `<button type="button" class="base-return" data-jump-textbase="${safeAttr(baseId)}">↩ Voltar ao texto-base</button>` : '';
   const questionHead = `<div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${hasExplanationContent(q) ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>`;
   const leadHtml = showBase ? `${baseHtml}${questionHead}` : `${questionHead}${returnToBase}`;
-  return `<article class="glass-card exam-question ${showBase ? 'exam-question-base' : ''}" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}">${leadHtml}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem" data-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, state.currentActivity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, state.currentActivity.config)}</div></article>`;
+  return `<article class="glass-card exam-question ${showBase ? 'exam-question-base' : ''}" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}">${leadHtml}${renderQuestionComposition(q)}${renderResponseOptions(q, answer?.response || '', answer, state.currentActivity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, state.currentActivity.config)}</div></article>`;
 }
 
 async function renderSession() {
@@ -1192,7 +1302,7 @@ async function renderResult(activity) {
     const textBase = textBaseById(q.textBaseId);
     const showTextBase = Boolean(textBase && !renderedResultTextBases.has(q.textBaseId));
     if (showTextBase) renderedResultTextBases.add(q.textBaseId);
-    return `<article class="result-question">${showTextBase ? `<div class="base-text" id="result-base-${safeAttr(q.textBaseId)}"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBaseDisplayContent(textBase, questions.filter(item => item.textBaseId === q.textBaseId)))}</div></div>` : ''}<h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${!showTextBase && textBase ? `<a class="base-return" href="#result-base-${safeAttr(q.textBaseId)}">↩ Ver texto-base</a>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation || selectedAlternativeImages ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b>${selectedAlternativeExplanation ? `<p>${richText(selectedAlternativeExplanation)}</p>` : ''}${selectedAlternativeImages}</div>` : ''}${q.explanation || generalExplanationImages ? `<div class="full-explanation"><b>Resolução completa</b>${q.explanation ? `<p>${richText(q.explanation)}</p>` : ''}${generalExplanationImages}</div>` : ''}${complete && !responseIsCorrect(q,answer.response) ? `<label class="error-reason-inline"><span>O que melhor explica esse erro?</span><select data-error-reason data-answer-id="${safeAttr(answer.id)}"><option value="">Selecione o motivo</option><option value="content" ${answer.errorReason==='content'?'selected':''}>Falta de conteúdo</option><option value="interpretation" ${answer.errorReason==='interpretation'?'selected':''}>Interpretação do enunciado</option><option value="calculation" ${answer.errorReason==='calculation'?'selected':''}>Erro de cálculo</option><option value="confusion" ${answer.errorReason==='confusion'?'selected':''}>Confusão conceitual</option><option value="time" ${answer.errorReason==='time'?'selected':''}>Gestão do tempo</option><option value="insecurity" ${answer.errorReason==='insecurity'?'selected':''}>Insegurança na escolha</option><option value="other" ${answer.errorReason==='other'?'selected':''}>Outro motivo</option></select></label>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
+    return `<article class="result-question">${showTextBase ? `<div class="base-text" id="result-base-${safeAttr(q.textBaseId)}"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${renderTextBaseContent(textBase, questions.filter(item => item.textBaseId === q.textBaseId))}</div></div>` : ''}<h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${!showTextBase && textBase ? `<a class="base-return" href="#result-base-${safeAttr(q.textBaseId)}">↩ Ver texto-base</a>` : ''}<div class="result-statement">${renderQuestionComposition(q)}</div><p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation || selectedAlternativeImages ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b>${selectedAlternativeExplanation ? `<p>${richText(selectedAlternativeExplanation)}</p>` : ''}${selectedAlternativeImages}</div>` : ''}${q.explanation || generalExplanationImages ? `<div class="full-explanation"><b>Resolução completa</b>${q.explanation ? `<p>${richText(q.explanation)}</p>` : ''}${generalExplanationImages}</div>` : ''}${complete && !responseIsCorrect(q,answer.response) ? `<label class="error-reason-inline"><span>O que melhor explica esse erro?</span><select data-error-reason data-answer-id="${safeAttr(answer.id)}"><option value="">Selecione o motivo</option><option value="content" ${answer.errorReason==='content'?'selected':''}>Falta de conteúdo</option><option value="interpretation" ${answer.errorReason==='interpretation'?'selected':''}>Interpretação do enunciado</option><option value="calculation" ${answer.errorReason==='calculation'?'selected':''}>Erro de cálculo</option><option value="confusion" ${answer.errorReason==='confusion'?'selected':''}>Confusão conceitual</option><option value="time" ${answer.errorReason==='time'?'selected':''}>Gestão do tempo</option><option value="insecurity" ${answer.errorReason==='insecurity'?'selected':''}>Insegurança na escolha</option><option value="other" ${answer.errorReason==='other'?'selected':''}>Outro motivo</option></select></label>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
   }).join('')}</div><div class="exam-bottom"><button class="button secondary" data-page="performance">Ver desempenho</button><button class="button primary" data-action="new-activity">Voltar ao gerador</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('.activity-layout').classList.add('hidden'); $('#pendingTaskSection')?.classList.add('hidden'); $('#savedActivitiesSection')?.classList.add('hidden'); $('#activityNoQuestions').classList.add('hidden'); $('#activitySession').classList.remove('hidden');
@@ -1838,10 +1948,8 @@ async function openQuestionDetail(id) {
   const textBase = textBaseById(question.textBaseId);
   const textBaseQuestions = question.textBaseId ? state.data.questions.filter(item => item.textBaseId === question.textBaseId) : [question];
   let expected = getExpectedAnswer(question);
-  const answerLabel = question.type === 'multiple_choice' ? `${expected}) ${question.alternatives?.[expected] || ''}` : expected;
-  const alternatives = question.type === 'multiple_choice' ? Object.entries(question.alternatives || {}).map(([key,value]) => `<div class="answer-option"><div class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</div></div>`).join('') : question.type === 'assertion_set' ? question.statements.map((item,index) => `<p><b>${index+1}.</b> ${richText(item.text)}</p>`).join('') : question.type === 'true_false' ? '<div class="answer-options"><div class="answer-option"><span><b>V</b> — Verdadeiro</span></div><div class="answer-option"><span><b>F</b> — Falso</span></div></div>' : '';
-  const beforeStemHtml = `${renderQuestionImages(question,['after_text_base'])}${renderQuestionTables(question,['after_text_base'])}${renderQuestionEquations(question,['after_text_base'])}${renderQuestionImages(question,['before_statement','before-statement'])}`;
-  const afterStemHtml = `${renderQuestionImages(question,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(question,['statement','after_statement'])}${renderQuestionEquations(question,['statement','after_statement'])}`;
+  const answerLabel = question.type === 'multiple_choice' ? `${expected}) ${getAlternativeAnswerLabel(question, expected)}` : expected;
+  const alternatives = question.type === 'multiple_choice' ? Object.entries(question.alternatives || {}).map(([key,value]) => `<div class="answer-option"><div class="option-content"><b>${escapeHTML(key)})</b> ${renderOptionContent(question,key,value)}</div></div>`).join('') : question.type === 'assertion_set' ? question.statements.map((item,index) => `<p><b>${index+1}.</b> ${richText(item.text)}</p>`).join('') : question.type === 'true_false' ? '<div class="answer-options"><div class="answer-option"><span><b>V</b> — Verdadeiro</span></div><div class="answer-option"><span><b>F</b> — Falso</span></div></div>' : '';
   const versionHistory = Array.isArray(question.versionHistory) ? question.versionHistory : [];
   const versionHistoryHtml = versionHistory.length ? `<details class="fine-print" style="margin-top:16px"><summary>Versões anteriores salvas (${versionHistory.length})</summary><div class="issue-list" style="margin-top:10px">${versionHistory.map((version,index)=>`<div class="preview-q"><b>Versão ${index+1} · ${escapeHTML(formatDate(version.archivedAt || version.updatedAt || version.createdAt,true))}</b><p>${escapeHTML(String(version.statement || '').slice(0,220))}${String(version.statement || '').length>220?'…':''}</p><small>${escapeHTML(version.archiveReason || 'Versão anterior')} ${version.replacedByPackage ? `· Pacote: ${escapeHTML(version.replacedByPackage)}` : ''}</small><div class="note-actions"><button class="text-button" data-action="restore-question-version" data-id="${safeAttr(id)}" data-version-index="${index}">Restaurar esta versão</button></div></div>`).join('')}</div></details>` : '';
   const alternativeCommentKeys = new Set([
@@ -1857,7 +1965,7 @@ async function openQuestionDetail(id) {
   const generalExplanationHtml = question.explanation || renderExplanationImages(question)
     ? `<div class="answer-feedback correct"><b>Resolução completa</b>${question.explanation ? `<p>${richText(question.explanation)}</p>` : ''}${renderExplanationImages(question)}</div>`
     : `<div class="answer-feedback correct"><b>Gabarito: ${escapeHTML(answerLabel)}</b></div>`;
-  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBaseDisplayContent(textBase, textBaseQuestions))}</div>` : ''}${beforeStemHtml}<div class="exam-stem">${richText(question.statement)}</div>${afterStemHtml}${renderQuestionReferences(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}${generalExplanationHtml}${alternativeCommentsHtml ? `<h3>Comentários das alternativas</h3>${alternativeCommentsHtml}` : ''}${versionHistoryHtml}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
+  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${renderTextBaseContent(textBase, textBaseQuestions)}</div>` : ''}${renderQuestionComposition(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}${generalExplanationHtml}${alternativeCommentsHtml ? `<h3>Comentários das alternativas</h3>${alternativeCommentsHtml}` : ''}${versionHistoryHtml}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
   await hydrateAssetImages($('#modalBody'));
 }
 
@@ -1915,7 +2023,7 @@ async function saveQuestionEdit(id) {
 
 function openImportModal() {
   state.importDraft = null;
-  openModal('Importar pacote de questões', `<div class="modal-form"><div class="import-drop"><span class="empty-symbol">{ }</span><b>Arquivo de dados · obrigatório</b><small>Selecione o JSON preparado para o Grafia Questions.</small><input type="file" id="importJsonFile" accept=".json,application/json"></div><div class="import-drop"><span class="empty-symbol">▧</span><b>Arquivo de imagens · opcional</b><small>Selecione o ZIP que contém as imagens referenciadas pelo JSON.</small><input type="file" id="importZipFile" accept=".zip,application/zip"></div><label>Após importar<select id="importMode"><option value="bank">Adicionar ao banco</option><option value="solve">Importar e resolver agora</option></select></label><p class="fine-print">O arquivo JSON deve ter schemaVersion "1.0.0" e uma lista "questions". Se houver imagens, os identificadores e nomes dos arquivos precisam corresponder. A prévia apontará itens incompletos antes de salvar.</p><button class="button secondary" type="button" data-action="download-template">Baixar modelo JSON vazio</button><div id="importPreview"></div></div>`, `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" id="analyzeImport" type="button">Analisar pacote</button>`, 'IMPORTAÇÃO E VALIDAÇÃO');
+  openModal('Importar pacote de questões', `<div class="modal-form"><div class="import-drop"><span class="empty-symbol">{ }</span><b>Arquivo de dados · obrigatório</b><small>Selecione o JSON preparado para o Grafia Questions.</small><input type="file" id="importJsonFile" accept=".json,application/json"></div><div class="import-drop"><span class="empty-symbol">▧</span><b>Arquivo de imagens · opcional</b><small>Selecione o ZIP que contém as imagens referenciadas pelo JSON.</small><input type="file" id="importZipFile" accept=".zip,application/zip"></div><label>Após importar<select id="importMode"><option value="bank">Adicionar ao banco</option><option value="solve">Importar e resolver agora</option></select></label><p class="fine-print">O JSON pode usar schemaVersion "2.0.0" (ou "1.0.0" para pacotes antigos). O formato 2.0 permite blocos de texto, poemas, listas, fórmulas, tabelas e alternativas com imagens. Se houver imagens, os identificadores e nomes dos arquivos precisam corresponder. A prévia apontará itens incompletos antes de salvar.</p><button class="button secondary" type="button" data-action="download-template">Baixar modelo JSON vazio</button><div id="importPreview"></div></div>`, `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" id="analyzeImport" type="button">Analisar pacote</button>`, 'IMPORTAÇÃO E VALIDAÇÃO');
 }
 async function analyzeImport() {
   const json = $('#importJsonFile')?.files?.[0];
@@ -1952,7 +2060,7 @@ function validateDraftQuestion(q, draft) {
   if (!(SUBJECTS[q.area] || []).length) issues.push('Área de conhecimento não reconhecida');
   if (!(SUBJECTS[q.area] || []).includes(q.subject)) issues.push('A matéria não corresponde à área selecionada');
   if (!q.primaryTopic) issues.push('Assunto principal não informado');
-  if (!q.statement) issues.push('Enunciado vazio');
+  if (!q.statement && !(q.contentBlocks || []).length) issues.push('Enunciado vazio: informe statement ou blocos de conteúdo');
   if (!q.answer || (typeof q.answer === 'string' && !q.answer.trim())) issues.push('Gabarito ausente');
   if (q.type === 'multiple_choice') {
     const keys = Object.keys(q.alternatives || {});
@@ -1985,6 +2093,9 @@ function renderImportPreview() {
   const cleanCount = draft.questions.length - issues.length;
   const duplicateCount = draft.duplicates.length;
   const unresolvedDuplicates = draft.duplicates.some(item => item.resolution === 'unresolved');
+  const blockCounts = new Map();
+  for (const question of draft.questions) for (const block of [...(question.contentBlocks || []), ...(question.commandBlocks || []), ...Object.values(question.alternativeContent || {}).flat()]) blockCounts.set(block.type, (blockCounts.get(block.type) || 0) + 1);
+  const blockSummary = [...blockCounts.entries()].map(([type,count]) => `${count} ${type}`).join(' · ');
   const duplicateRows = draft.duplicates.map(item => {
     const identityNote = item.matchType === 'content'
       ? 'O enunciado e as alternativas coincidem, mas imagens ou texto-base podem ser diferentes. Confira antes de decidir.'
@@ -1997,7 +2108,7 @@ function renderImportPreview() {
   }).join('');
   const lessInfoDuplicates = draft.duplicates.filter(item => item.incomingHasLessInfo).length;
   const batchReplacementAction = lessInfoDuplicates ? `<div class="note-actions"><button class="text-button" data-action="replace-less-complete-duplicates">Substituir em lote as ${lessInfoDuplicates} versões importadas com menos informações</button></div>` : '';
-  const html = `<div class="import-summary"><div><strong>${draft.questions.length}</strong><span>questões lidas</span></div><div><strong>${cleanCount}</strong><span>sem pendências</span></div><div><strong>${draft.assets.length}</strong><span>imagens localizadas</span></div></div><p class="fine-print">Pacote: ${escapeHTML(draft.packageName)} · ${escapeHTML(draft.schemaVersion)} · ${draft.filesFound} arquivos no ZIP. ${duplicateCount} duplicatas identificadas.</p>${issues.length ? `<h3>Questões incompletas (${issues.length})</h3><div class="issue-list">${issues.map(({q,issues: qIssues}) => `<div class="preview-q"><b>${escapeHTML(q.id)} · ${escapeHTML(q.subject || 'Matéria pendente')}</b><p>${escapeHTML(qIssues.join(' · '))}</p><div class="note-actions"><button class="text-button" data-action="edit-import-question" data-id="${safeAttr(q.id)}">Completar</button><button class="text-button" data-action="remove-import-question" data-id="${safeAttr(q.id)}">Excluir do pacote</button></div></div>`).join('')}</div>` : '<div class="issue-item">Todas as questões passaram na verificação básica.</div>'}${duplicateCount ? `<h3>Questões já existentes (${duplicateCount})</h3>${batchReplacementAction}<div class="issue-list">${duplicateRows}</div>` : ''}<div class="field-label" style="margin-top:13px">${draft.sourceExam ? `Prova de origem identificada: ${escapeHTML(draft.sourceExam.title || draft.sourceExam.name || 'Simulado / prova')}` : 'Sem prova de origem declarada.'}</div>`;
+  const html = `<div class="import-summary"><div><strong>${draft.questions.length}</strong><span>questões lidas</span></div><div><strong>${cleanCount}</strong><span>sem pendências</span></div><div><strong>${draft.assets.length}</strong><span>imagens localizadas</span></div></div><p class="fine-print">Pacote: ${escapeHTML(draft.packageName)} · schema ${escapeHTML(draft.schemaVersion)} · ${draft.filesFound} arquivos no ZIP. ${duplicateCount} duplicatas identificadas.</p>${blockSummary ? `<p class="fine-print">Estruturas detectadas: ${escapeHTML(blockSummary)}.</p>` : ''}${issues.length ? `<h3>Questões incompletas (${issues.length})</h3><div class="issue-list">${issues.map(({q,issues: qIssues}) => `<div class="preview-q"><b>${escapeHTML(q.id)} · ${escapeHTML(q.subject || 'Matéria pendente')}</b><p>${escapeHTML(qIssues.join(' · '))}</p><div class="note-actions"><button class="text-button" data-action="edit-import-question" data-id="${safeAttr(q.id)}">Completar</button><button class="text-button" data-action="remove-import-question" data-id="${safeAttr(q.id)}">Excluir do pacote</button></div></div>`).join('')}</div>` : '<div class="issue-item">Todas as questões passaram na verificação básica.</div>'}${duplicateCount ? `<h3>Questões já existentes (${duplicateCount})</h3>${batchReplacementAction}<div class="issue-list">${duplicateRows}</div>` : ''}<div class="field-label" style="margin-top:13px">${draft.sourceExam ? `Prova de origem identificada: ${escapeHTML(draft.sourceExam.title || draft.sourceExam.name || 'Simulado / prova')}` : 'Sem prova de origem declarada.'}</div>`;
   $('#importPreview').innerHTML = html;
   $('#modalFooter').innerHTML = `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" data-action="commit-import" ${issues.length || unresolvedDuplicates ? 'disabled' : ''}>${draft.mode === 'solve' ? 'Importar e resolver' : 'Adicionar ao banco'} (${cleanCount})</button>`;
 }
@@ -2009,7 +2120,7 @@ function editImportQuestion(id) {
   }).join('');
   const alternatives = JSON.stringify(q.alternatives || {}, null, 2);
   const statements = (q.statements || []).map(item => item.text).join('\n');
-  openModal(`Completar ${q.id}`, `<form id="editImportForm" class="modal-form"><label>Área<select name="area">${Object.keys(SUBJECTS).map(area=>`<option ${q.area===area?'selected':''}>${escapeHTML(area)}</option>`).join('')}</select></label><label>Matéria<select name="subject">${Object.values(SUBJECTS).flat().map(subject=>`<option ${q.subject===subject?'selected':''}>${escapeHTML(subject)}</option>`).join('')}</select></label><label>Assunto principal<input name="primaryTopic" value="${safeAttr(q.primaryTopic)}"></label><label>Enunciado<textarea name="statement">${escapeHTML(q.statement)}</textarea></label>${q.type === 'multiple_choice' ? `<label>Alternativas em JSON<textarea name="alternatives" spellcheck="false">${escapeHTML(alternatives)}</textarea><small>Use um objeto com chaves A, B, C… e o texto de cada alternativa.</small></label>` : ''}${q.type === 'assertion_set' ? `<label>Afirmações (uma por linha)<textarea name="statements">${escapeHTML(statements)}</textarea></label>` : ''}<label>Gabarito${q.type === 'assertion_set' ? ' (sequência V/F, por exemplo VFV)' : q.type === 'true_false' ? ' (V ou F)' : ' (letra da alternativa)'}<input name="answer" value="${safeAttr(typeof q.answer==='string'?q.answer:JSON.stringify(q.answer))}"></label><label>Resolução geral (opcional)<textarea name="explanation">${escapeHTML(q.explanation || '')}</textarea></label><div><span class="field-title">Imagens vinculadas</span>${imageRows || '<small>Esta questão não referencia imagens.</small>'}</div></form>`, `<button class="button secondary" data-action="back-import-preview">Voltar</button><button class="button primary" data-action="save-import-question" data-id="${safeAttr(id)}">Salvar alterações</button>`, 'REVISÃO DO PACOTE');
+  openModal(`Completar ${q.id}`, `<form id="editImportForm" class="modal-form"><label>Área<select name="area">${Object.keys(SUBJECTS).map(area=>`<option ${q.area===area?'selected':''}>${escapeHTML(area)}</option>`).join('')}</select></label><label>Matéria<select name="subject">${Object.values(SUBJECTS).flat().map(subject=>`<option ${q.subject===subject?'selected':''}>${escapeHTML(subject)}</option>`).join('')}</select></label><label>Assunto principal<input name="primaryTopic" value="${safeAttr(q.primaryTopic)}"></label><label>Texto corrido complementar (opcional)<textarea name="statement">${escapeHTML(q.statement)}</textarea><small>O conteúdo estruturado existente será preservado; este campo não substitui poemas, fórmulas ou outros blocos.</small></label>${q.type === 'multiple_choice' ? `<label>Alternativas em JSON<textarea name="alternatives" spellcheck="false">${escapeHTML(alternatives)}</textarea><small>Use um objeto com chaves A, B, C… e o texto de cada alternativa.</small></label>` : ''}${q.type === 'assertion_set' ? `<label>Afirmações (uma por linha)<textarea name="statements">${escapeHTML(statements)}</textarea></label>` : ''}<label>Gabarito${q.type === 'assertion_set' ? ' (sequência V/F, por exemplo VFV)' : q.type === 'true_false' ? ' (V ou F)' : ' (letra da alternativa)'}<input name="answer" value="${safeAttr(typeof q.answer==='string'?q.answer:JSON.stringify(q.answer))}"></label><label>Resolução geral (opcional)<textarea name="explanation">${escapeHTML(q.explanation || '')}</textarea></label><div><span class="field-title">Imagens vinculadas</span>${imageRows || '<small>Esta questão não referencia imagens.</small>'}</div></form>`, `<button class="button secondary" data-action="back-import-preview">Voltar</button><button class="button primary" data-action="save-import-question" data-id="${safeAttr(id)}">Salvar alterações</button>`, 'REVISÃO DO PACOTE');
 }
 function saveImportQuestion(id) {
   const draft = state.importDraft; const q = draft?.questions.find(item => item.id === id); const form = $('#editImportForm'); if (!q || !form) return;
@@ -2281,9 +2392,12 @@ async function exportQuestionPackage() {
     entries.push({ name: path, data: stored.blob });
   }
   const questions = state.data.questions.map(q => {
-    const { incomplete, importIssues, createdAt, updatedAt, favorite, ...exportable } = q;
+    const { incomplete, importIssues, createdAt, updatedAt, favorite, contentBlocks, commandBlocks, alternativeContent, ...exportable } = q;
     return {
       ...exportable,
+      ...(contentBlocks?.length ? { content: contentBlocks } : {}),
+      ...(commandBlocks?.length ? { command: { content: commandBlocks } } : {}),
+      ...(alternativeContent && Object.keys(alternativeContent).length ? { alternativeContent } : {}),
       id: q.id,
       area: q.area,
       subject: q.subject,
@@ -2302,7 +2416,7 @@ async function exportQuestionPackage() {
     };
   });
   const relatedExams = state.data.collections.filter(collection => collection.type === 'sourceExam' && (collection.questionIds || []).some(id => questions.some(q => q.id === id)));
-  const pkg = { schemaVersion: '1.0.0', packageId: makeId('package'), packageName: 'Pacote exportado do Grafia Questions', generatedAt: nowISO(), source: { name: 'Grafia Questions', exportedAt: nowISO() }, ...(relatedExams.length === 1 ? { sourceExam: { title: relatedExams[0].title, description: relatedExams[0].description, questionIds: relatedExams[0].questionIds, originalOrder: relatedExams[0].originalOrder } } : {}), questions, textBases: state.data.textBases };
+  const pkg = { schemaVersion: '2.0.0', packageId: makeId('package'), packageName: 'Pacote exportado do Grafia Questions', generatedAt: nowISO(), source: { name: 'Grafia Questions', exportedAt: nowISO() }, ...(relatedExams.length === 1 ? { sourceExam: { title: relatedExams[0].title, description: relatedExams[0].description, questionIds: relatedExams[0].questionIds, originalOrder: relatedExams[0].originalOrder } } : {}), questions, textBases: state.data.textBases };
   const jsonBlob = new Blob([JSON.stringify(pkg,null,2)], {type:'application/json'});
   const zipBlob = entries.length ? await writeZip(entries) : null;
   const stamp = Date.now();
@@ -2478,7 +2592,7 @@ async function restoreBackup() {
 
 async function downloadTemplate() {
   const template = {
-    schemaVersion: '1.0.0', packageId: 'pacote-identificador-unico', packageName: 'Nome do pacote', generatedAt: nowISO(),
+    schemaVersion: '2.0.0', packageId: 'pacote-identificador-unico', packageName: 'Nome do pacote', generatedAt: nowISO(),
     source: { name: '', exam: '', year: null },
     textBases: [],
     questions: []
@@ -2497,7 +2611,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.6.0');
+  await setSetting(state.db, 'appVersion', '1.7.0');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2653,7 +2767,7 @@ async function toggleTextHighlight() {
   if (root) {
     root.innerHTML = target === 'textBase'
       ? richText(textBaseById(question.textBaseId)?.content || '')
-      : questionStatementHTML(question.statement);
+      : renderQuestionBodyContent(question);
     applyTextMarks(root, nextMarks, target);
   }
   hideTextSelectionToolbar();
