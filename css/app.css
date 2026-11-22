@@ -1936,7 +1936,7 @@ input:not([type=checkbox]):not([type=radio]), select, textarea {
 }
 
 
-/* Grafia Questions 1.7.0 — Classic Red Glass + continuous editorial question flow */
+/* Grafia Questions 1.7.1 — Classic Red Glass + continuous editorial question flow */
 :root {
   color-scheme: dark;
   --bg: #180D12;
