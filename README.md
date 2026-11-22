@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.6.4
+# Grafia Questions — versão 1.7.0
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -25,10 +25,10 @@ Não abra o `index.html` diretamente pelo gerenciador de arquivos para uso perma
 
 O fluxo utiliza dois arquivos separados:
 
-1. JSON obrigatório (`schemaVersion: "1.0.0"`), com questões, alternativas, gabaritos, resoluções, classificação e referências às imagens.
+1. JSON obrigatório (`schemaVersion: "2.0.0"`; pacotes `1.0.0` antigos continuam aceitos), com questões, alternativas, gabaritos, resoluções, classificação e referências às imagens.
 2. ZIP opcional com as imagens referenciadas no JSON.
 
-Consulte `SCHEMA_PACOTE.md` e `MODELO_PACOTE.json`. O modelo começa com `questions: []`; não é um conjunto de questões fictícias. As imagens de resoluções gerais e de comentários individuais das alternativas usam o mesmo array `images` e o mesmo ZIP da importação; consulte as posições `explanation` e `alternative_explanation:A` no schema.
+Consulte `SCHEMA_PACOTE.md` e `MODELO_PACOTE.json`. O schema 2.0.0 introduz blocos ordenados de conteúdo, comando estruturado e alternativas multimodais, mantendo a leitura de pacotes 1.0.0. O modelo começa com `questions: []`; não é um conjunto de questões fictícias. As imagens de resoluções gerais e de comentários individuais das alternativas usam o mesmo array `images` e o mesmo ZIP da importação; consulte as posições `explanation` e `alternative_explanation:A` no schema.
 
 A importação verifica a estrutura, IDs estáveis e únicos, referências de imagens, textos-base, correspondência entre área e matéria, questões incompletas e duplicatas. Um `assetId` já existente não pode ser reutilizado para outro arquivo de imagem: o conteúdo é comparado para impedir que questões antigas passem a apontar silenciosamente para uma imagem diferente. Um ID já existente com enunciado/alternativas diferentes bloqueia a importação para evitar mesclagem acidental. Para detectar questões iguais com IDs de imagens ou textos-base diferentes, a comparação também considera o conteúdo do enunciado e das alternativas; quando essa correspondência textual é usada, a importação exige uma decisão manual para evitar unir questões com figuras diferentes. Em cada duplicata, escolha enriquecer, manter a versão atual ou substituir pela versão importada, mesmo que ela tenha menos informações. A substituição preserva os IDs usados por atividades e respostas, mantém favoritos e histórico de respostas, guarda até cinco versões anteriores e permite restaurá-las na tela de detalhes da questão. Questões incompletas podem ser editadas ou removidas da importação. A análise de JSON e ZIP roda em um Web Worker quando o navegador oferece suporte, reduzindo o bloqueio da interface. A gravação ocorre em lotes de até 200 questões e 100 imagens. Se o navegador interromper a operação, reanalise o mesmo par JSON/ZIP para retomar por identificadores e deduplicação; esta versão ainda não usa um cursor de retomada formal. O ZIP é verificado por tamanho e CRC antes de os arquivos serem armazenados.
 
@@ -43,15 +43,11 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 - A estimativa de proficiência inspirada na TRI é experimental e só aparece com parâmetros `a`, `b` e `c` fornecidos no pacote; não é uma nota oficial do ENEM.
 - A estimativa não deve ser interpretada sem calibração empírica dos parâmetros.
-- Fórmulas são exibidas como expressões textuais; o aplicativo não inclui um renderizador avançado de LaTeX nesta versão.
+- Fórmulas podem ser representadas em MathML nativo ou em LaTeX com apresentação de compatibilidade para expressões comuns. Para expressões complexas, prefira fornecer MathML junto ao LaTeX original.
 - O diagnóstico de desempenho usa os registros das atividades concluídas, com filtros por período, área, matéria e assunto/subassunto. As recomendações são heurísticas e exigem ao menos três respostas no assunto; as categorias associadas à questão são metadados, enquanto os motivos de erro são autodeclarados pelo estudante. As revisões continuam usando intervalos heurísticos, não um algoritmo adaptativo avançado.
 - O importador de ZIP usa recursos nativos do navegador (DecompressionStream para entradas compactadas), aceita ZIP32 sem senha e possui limites de tamanho/quantidade para reduzir riscos de arquivos excessivos. ZIP64 e arquivos criptografados não são aceitos. O JSON de questões tem limite de 100 MB; o ZIP tem limite de 512 MB, cada arquivo individual até 100 MB e 20.000 entradas. Navegadores antigos podem exigir ZIPs sem compressão ou atualização.
 - A interface mantém os registros textuais carregados em memória para alimentar filtros, painéis e relatórios; a lista visual é paginada, mas a consulta ainda não usa paginação por cursor diretamente no IndexedDB. Por isso, antes de importar acervos muito grandes (dezenas ou centenas de milhares de questões), é recomendável validar o desempenho no dispositivo e planejar uma otimização de consultas sob demanda. A importação já é dividida em lotes e a preparação do pacote usa Web Worker quando disponível.
 - Não há sincronização entre dispositivos, contas, servidor, IA interna, criptografia dos backups ou recuperação de senha: os arquivos de backup são o meio de transferência.
-
-## Histórico da atualização
-
-Consulte `CHANGELOG_v1.6.1.md` para as mudanças mais recentes e os changelogs anteriores para o histórico de versões.
 
 ## Estrutura do projeto
 
@@ -71,19 +67,6 @@ icons/icon-512.png
 MODELO_PACOTE.json
 SCHEMA_PACOTE.md
 AUDITORIA_GRAFIA_QUESTIONS_v1.0.1.md
-CHANGELOG_v1.0.3.md
-CHANGELOG_v1.0.4.md
-CHANGELOG_v1.1.0.md
-CHANGELOG_v1.3.0.md
-CHANGELOG_v1.4.0.md
-CHANGELOG_v1.5.0.md
-CHANGELOG_v1.5.1.md
-CHANGELOG_v1.5.2.md
-CHANGELOG_v1.5.3.md
-CHANGELOG_v1.5.4.md
-CHANGELOG_v1.5.5.md
-CHANGELOG_v1.6.0.md
-CHANGELOG_v1.6.1.md
 README.md
 ```
 
@@ -188,7 +171,17 @@ A versão 1.6.2 adota a identidade monocromática Royal Charcoal em toda a inter
 
 ## Identidade visual
 
-A versão 1.6.2 usa a paleta monocromática Royal Charcoal, com fundos carvão, superfícies grafite, cinzas ardósia e texto claro. Os ícones PWA também usam escala de cinza.
+A versão 1.7.0 restaura a identidade Classic Red Glass: fundos bordô e vinho, superfícies translúcidas em vermelho profundo, acentos crimson e tipografia clara. O tema é aplicado à interface, aos estados de interação e às cores do PWA; os ícones clássicos em vermelho são preservados.
 
 
 A versão 1.6.4 adota a identidade visual Forest Glass aprovada: fundos verde-profundo, superfícies de vidro verde, acentos sálvia e texto menta. Foram renovados o fundo atmosférico, os cartões, a barra superior, a navegação, os botões, os estados das alternativas, os indicadores, os ícones do PWA e a cor do navegador. O banco local, a estrutura de dados e os formatos JSON + ZIP permanecem inalterados.
+
+
+## Atualização 1.7.0 — Modelo universal de questões
+
+- Introduz o schema de importação 2.0.0 com blocos ordenados para parágrafos, títulos, citações, poemas/estrofes/versos, listas, fórmulas, estruturas químicas, tabelas, imagens, diagramas, gráficos como imagem, divisores, código e destaques.
+- Adiciona comando estruturado e alternativas compostas por blocos, incluindo fórmulas e imagens.
+- Mantém a compatibilidade de leitura e exportação de conteúdo legado do schema 1.0.0.
+- Separa estrutura de dados e apresentação: os blocos são renderizados em uma composição editorial contínua, sem cartões individuais obrigatórios.
+- Restaura a identidade Classic Red Glass, substituindo o tema Forest/Cool Steel por fundos bordô e vermelho profundo com acentos crimson.
+- O reconhecimento de PDFs/OCR por IA não faz parte desta atualização: o importador continua recebendo JSON estruturado e ZIP opcional de imagens.

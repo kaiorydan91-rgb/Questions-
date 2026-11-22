@@ -1,140 +1,282 @@
-# Formato de importação do Grafia Questions — schema 1.0.0
+# Formato de importação do Grafia Questions — schema 2.0.0
 
-A importação utiliza um arquivo JSON obrigatório e um ZIP opcional de imagens. O banco inicial do aplicativo é vazio; este documento não contém questões de demonstração.
+O Grafia Questions aceita pacotes `2.0.0` e continua lendo pacotes legados `1.0.0`. O schema 2.0.0 foi criado para representar uma questão como uma composição ordenada de elementos, sem obrigar que o enunciado seja um único parágrafo ou que as alternativas sejam apenas texto.
 
-## Arquivo de dados
+## Arquivos do pacote
 
-O JSON deve possuir:
+1. `pacote-questoes.json` — obrigatório. Contém questões, estruturas, gabaritos, classificação e referências a recursos.
+2. `pacote-imagens.zip` — opcional. Contém arquivos citados em `images[].file`.
 
-- `schemaVersion`: obrigatoriamente `1.0.0`.
-- `packageId`: identificador estável do pacote, que deve ser mantido ao reanalisar/reimportar o mesmo conjunto.
-- `packageName`: nome legível do pacote.
-- `source`: procedência geral (instituição, prova, ano ou origem). Pode incluir `url`, `link` ou `href` para a página da fonte; o endereço é apresentado em um bloco visual separado do enunciado. A questão também aceita `sourceUrl`/`sourceLink` ou `links`/`references` como alternativas.
-- `textBases`: textos-base compartilhados por questões. Questões vinculadas devem apontar para o mesmo `textBaseId`; durante a importação, textos com conteúdo normalizado idêntico e a mesma prova/origem também podem ser unificados automaticamente, mesmo que tenham IDs diferentes.
-- `questions`: lista de questões.
-- `sourceExam` (opcional): metadados da prova de origem, incluindo título, descrição e ordem original. `sourceExam.originalOrder` deve conter os IDs das questões na sequência da prova (não a ordem de classificação por matéria); o aplicativo preserva essa ordem e também mantém cada questão no banco geral.
+Imagens não devem ser incorporadas em base64 no JSON. Use caminhos relativos únicos dentro do ZIP.
 
-## Campos recomendados por questão
+## Estrutura geral
 
-Cada questão precisa de um `id` globalmente único e estável entre reimportações. Não reutilize IDs genéricos como `1`, `2` ou `Q001` em pacotes diferentes; prefira IDs que incorporem origem, ano, prova e número. O importador bloqueia IDs existentes cujo enunciado/alternativas sejam diferentes, para evitar mesclar questões distintas.
+```json
+{
+  "schemaVersion": "2.0.0",
+  "packageId": "identificador-estavel-unico",
+  "packageName": "Nome do pacote",
+  "generatedAt": "2026-11-22T12:00:00.000Z",
+  "source": { "name": "Instituição", "exam": "Prova", "year": 2026 },
+  "textBases": [],
+  "questions": []
+}
+```
+
+`packageId` deve permanecer estável quando o mesmo conjunto for reanalisado ou reimportado. Cada questão também precisa de um `id` globalmente único e estável. Não use IDs genéricos como `1`, `2` ou `Q001` em pacotes diferentes.
+
+## Conceito central: sequência de blocos
+
+No schema 2.0.0, `content` é uma lista ordenada de blocos. A ordem da lista é a ordem em que o aluno deve ler os elementos. Os blocos não criam cartões visuais separados: o Grafia os apresenta em uma composição contínua, respeitando a estrutura interna de cada um.
+
+Cada bloco aceita `id` e `type`, além dos campos específicos do tipo. Campos adicionais são preservados no registro, mas tipos desconhecidos são sinalizados para revisão e recebem uma apresentação de fallback; não serão interpretados como HTML.
+
+### Tipos de bloco disponíveis
+
+| `type` | Campos principais | Uso |
+|---|---|---|
+| `paragraph` | `text` | Parágrafo normal; aceita quebras de linha, links Markdown e negrito/itálico simples |
+| `heading` | `text` | Título ou subtítulo interno |
+| `quote` | `text` | Citação ou trecho destacado |
+| `poem` | `stanzas` | Poema com estrofes e versos preservados |
+| `list` | `ordered`, `listType`, `items` | Lista ordenada ou não ordenada; itens podem ter `children` |
+| `formula` | `latex`, `mathml`, `label` | Expressão matemática; MathML é preferível para renderização fiel e LaTeX é preservado como origem/fallback |
+| `chemistry` | `formula`, `mathml`, `label` | Fórmula química, índices e cargas; MathML pode ser usado para estruturas mais complexas |
+| `table` | `title`, `headers`, `rows`, `caption` | Tabela com células e suporte a `colSpan`/`rowSpan` |
+| `image` | `assetId`, `alt`, `caption` | Imagem referenciada em `images[]` |
+| `diagram` | `assetId`, `alt`, `caption` | Diagrama preservado como imagem |
+| `chart` | `assetId`, `alt`, `caption` | Gráfico preservado como imagem para manter a fidelidade visual |
+| `divider` | — | Separador visual discreto |
+| `code` | `text` | Trecho monoespaçado ou código impresso no material |
+| `callout` | `text` | Observação ou destaque lateral |
+| `command` | `text` ou `children` | Comando da questão, com destaque editorial próprio |
+
+### Exemplo de enunciado misto
 
 ```json
 {
   "id": "BIO-2026-001",
   "area": "Ciências da Natureza",
   "subject": "Biologia",
-  "primaryTopic": "Citologia",
-  "secondaryTopics": ["Bioenergética"],
-  "relatedSubjects": ["Química"],
-  "classificationConfidence": 0.92,
-  "classificationNote": "Classificação conferida a partir do conteúdo da questão.",
-  "subtopics": ["Respiração celular"],
-  "prerequisites": ["Organelas celulares"],
-  "skills": ["Interpretar processos celulares"],
-  "difficulty": "Média",
+  "primaryTopic": "Bioquímica",
   "type": "multiple_choice",
-  "statement": "Enunciado da questão.",
-  "alternatives": {"A":"...", "B":"...", "C":"...", "D":"...", "E":"..."},
-  "answer": "B",
-  "explanation": "Resolução geral, quando disponível.",
-  "alternativeExplanations": {"A":"...", "C":"..."},
-  "textBaseId": "TEXTO-001",
-  "images": [
+  "content": [
+    { "id": "p1", "type": "paragraph", "text": "A água participa de inúmeros processos biológicos." },
     {
-      "id": "IMG-BIO-001",
-      "file": "imagens/IMG-BIO-001.webp",
-      "position": "after_statement",
-      "alt": "Descrição objetiva da imagem",
-      "caption": "Legenda opcional",
-      "sourceUrl": "https://exemplo.org/imagem-original",
-      "kind": "essential",
-      "essential": true
-    }
+      "id": "poema1",
+      "type": "poem",
+      "stanzas": [
+        ["Primeiro verso", "Segundo verso"],
+        ["Terceiro verso", "Quarto verso"]
+      ]
+    },
+    { "id": "formula1", "type": "chemistry", "formula": "H2O" },
+    { "id": "p2", "type": "paragraph", "text": "Sua geometria molecular influencia suas propriedades." }
   ],
-  "tables": [{"title":"Dados observados", "headers":["Amostra","Valor"], "rows":[["A","12"]], "position":"after_statement"}],
-  "equations": [{"label":"Expressão", "expression":"E = mc²", "position":"after_statement"}],
-  "sourceQuestionNumber": 1,
-  "source": {"name":"Instituição ou prova", "year":2026, "url":"https://exemplo.org/prova"},
-  "links": [{"label":"Página de origem", "url":"https://exemplo.org/questao"}],
-  "triParameters": {"a":1.1,"b":0.2,"c":0.18}
+  "command": {
+    "content": [
+      { "type": "paragraph", "text": "Considerando essas informações, assinale a alternativa correta." }
+    ]
+  },
+  "alternatives": {
+    "A": "Sua natureza polar.",
+    "B": "Sua composição exclusivamente iônica.",
+    "C": "Sua estrutura apolar."
+  },
+  "answer": "A"
 }
 ```
 
-### Tipos de questão
+`statement` continua aceito para questões simples e para compatibilidade com o schema anterior. Se `content` existir, ele é a sequência principal do corpo da questão. Questões podem usar `statement`, `content` ou ambos; quando ambos são fornecidos, `content` é a composição principal e `statement` fica como texto complementar legado, não é duplicado automaticamente.
 
-Esta versão não aceita questões discursivas. Se o material de origem contiver uma questão discursiva, interrompa a preparação do pacote e confirme com o usuário como deseja tratá-la; não a converta automaticamente em objetiva.
+## Poemas, listas e enumerações
 
-- `multiple_choice`: resposta única por alternativas. `answer` corresponde à chave da alternativa.
-- `true_false`: uma afirmação; `answer` deve ser `V` ou `F`.
-- `assertion_set`: múltiplas afirmações; use `statements` como array de objetos `{ "id": "S1", "text": "..." }` e `answer` como sequência de `V` e `F`, por exemplo `"VFV"`.
-
-Questões ligadas a textos-base usam `textBaseId`. Os textos-base ficam no array `textBases`, com `id`, `title`, `content` e `source` opcionais. Para compartilhar um texto entre várias questões, crie **um único objeto** em `textBases` e informe o mesmo `textBaseId` em todas as questões vinculadas; não repita o texto longo dentro de cada `statement`. Na atividade, o texto é exibido uma vez antes da primeira questão do grupo, e as seguintes oferecem o atalho **Voltar ao texto-base**. `sourceQuestionNumber` deve preservar a numeração original para que as questões do grupo sejam apresentadas na sequência da prova. Durante a importação, textos-base com conteúdo normalizado idêntico e a mesma origem podem ser unificados mesmo que tenham IDs diferentes. Essa detecção depende da existência de objetos em `textBases`; conteúdo longo duplicado apenas dentro de `statement` não é separado automaticamente.
-
-Uma questão pode indicar assuntos secundários (`secondaryTopics`), subassuntos (`subtopics`), matérias relacionadas (`relatedSubjects`), pré-requisitos (`prerequisites`) e habilidades (`skills`). `classificationConfidence` é um número entre 0 e 1; `classificationNote` registra ressalvas ou justificativas da classificação.
-
-### Imagens
-
-O campo `images` aceita várias referências. `id` identifica o recurso; `file` informa o caminho dentro do ZIP; `position` define onde a imagem será exibida:
-
-- `before_statement`
-- `statement` ou `after_statement`
-- `after_text_base`
-- `option:A`, `option:B` etc. (também aceita `alternative:A`) — imagem que faz parte do conteúdo da alternativa.
-- `after_alternatives`
-- `explanation` — imagem da resolução geral, exibida junto ao campo `explanation`.
-- `alternative_explanation:A`, `alternative_explanation:B` etc. — imagem que pertence ao comentário individual da alternativa indicada. Também são aceitos os aliases `alternative-explanation:A`, `alternative_comment:A` e `alternative-comment:A`.
-
-As imagens de resolução geral e de comentários individuais podem coexistir com imagens do enunciado e das alternativas na mesma questão. Todas são declaradas no mesmo array `images` e armazenadas no mesmo ZIP; não crie arrays de imagens separados nem insira base64 no JSON. Uma imagem pode ser usada mesmo quando o respectivo texto de explicação estiver vazio. Na atividade, o comentário de uma alternativa aparece de acordo com as configurações de correção já existentes e fica associado à alternativa selecionada; a resolução geral acompanha as regras atuais de exibição de comentários. Na revisão final e na visualização completa da questão, as imagens são mostradas com seus respectivos comentários.
-
-Exemplo de duas imagens adicionais na mesma questão:
+Cada item de `stanzas` representa uma estrofe; cada string dentro da estrofe representa um verso. Não coloque quebras de estrofe apenas com espaços ou linhas vazias dentro de um parágrafo.
 
 ```json
 {
-  "explanation": "Observe o gráfico para comparar os intervalos e justificar o resultado.",
-  "alternativeExplanations": {
-    "B": "A alternativa B confunde a taxa média com a taxa instantânea."
-  },
+  "type": "poem",
+  "stanzas": [
+    ["Verso 1", "Verso 2"],
+    ["Verso 3", "Verso 4"]
+  ]
+}
+```
+
+Listas usam `ordered: true` para numeração e `ordered: false` para marcadores. Também aceitam `listType: "numbered"` ou `listType: "ordered"`. Cada item pode conter texto e blocos filhos.
+
+```json
+{
+  "type": "list",
+  "ordered": true,
+  "items": [
+    { "text": "Primeiro item" },
+    { "text": "Segundo item", "children": [
+      { "type": "paragraph", "text": "Detalhe do segundo item." }
+    ]}
+  ]
+}
+```
+
+## Matemática e química
+
+Blocos `formula` aceitam `latex` ou `mathml`. O MathML é renderizado pelo suporte nativo do navegador, com uma lista restrita de elementos e atributos permitidos. Para expressões complexas, forneça `mathml` e mantenha a expressão original em `latex` para portabilidade e edição.
+
+```json
+{
+  "type": "formula",
+  "label": "Expressão matemática",
+  "latex": "\\frac{x^2+1}{2} = \\sqrt{9}",
+  "mathml": "<math><mfrac><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><mn>1</mn></mrow><mn>2</mn></mfrac><mo>=</mo><msqrt><mn>9</mn></msqrt></math>"
+}
+```
+
+Para química, `formula` aceita texto como `H2O`, `Ca(OH)2` ou `Fe^{3+}`. Índices e cargas simples são apresentados como subscritos e sobrescritos. Use MathML para estruturas que exijam ligações, alinhamentos ou notação mais complexa.
+
+O renderizador LaTeX incluído é deliberadamente de compatibilidade e cobre notações comuns; ele não substitui um motor TeX completo. Não dependa da conversão automática de qualquer comando LaTeX arbitrário.
+
+## Tabelas
+
+`headers` contém as células do cabeçalho e `rows` contém arrays de células. Uma célula pode ser uma string ou objeto com `text`, `colSpan` e `rowSpan`. Isso permite cabeçalhos agrupados e células mescladas.
+
+```json
+{
+  "type": "table",
+  "title": "Resultados observados",
+  "headerRows": [
+    [
+      { "text": "Amostra", "rowSpan": 2 },
+      { "text": "Medições", "colSpan": 2 }
+    ],
+    ["Antes", "Depois"]
+  ],
+  "rows": [
+    ["A", "12", "18"],
+    ["B", "9", "14"]
+  ],
+  "caption": "Valores apresentados no experimento."
+}
+```
+
+## Imagens, mapas, gráficos e diagramas
+
+Os blocos `image`, `diagram` e `chart` apontam para um recurso cadastrado em `images[]` pelo mesmo `assetId`. A imagem deve estar no ZIP, no caminho indicado em `images[].file`.
+
+```json
+{
+  "content": [
+    { "type": "paragraph", "text": "Observe a representação a seguir." },
+    { "type": "image", "assetId": "IMG-001", "alt": "Circuito elétrico" },
+    { "type": "paragraph", "text": "Considere os componentes representados." }
+  ],
   "images": [
     {
-      "id": "BIO-2026-001-RESOLUCAO-GRAFICO",
-      "file": "imagens/BIO-2026-001-RESOLUCAO-GRAFICO.webp",
-      "position": "explanation",
-      "alt": "Gráfico utilizado na resolução geral",
-      "caption": "Comparação dos dados ao longo do tempo"
-    },
-    {
-      "id": "BIO-2026-001-ALT-B-DIAGRAMA",
-      "file": "imagens/BIO-2026-001-ALT-B-DIAGRAMA.webp",
-      "position": "alternative_explanation:B",
-      "alt": "Diagrama que explica o erro da alternativa B"
+      "id": "IMG-001",
+      "file": "imagens/IMG-001.webp",
+      "position": "statement",
+      "alt": "Circuito elétrico com bateria e resistores",
+      "caption": "Esquema do circuito",
+      "kind": "essential",
+      "essential": true
     }
   ]
 }
 ```
 
-Tabelas e expressões aceitam posições como `after_statement`, `after_text_base` e `after_alternatives`; cada tabela possui `headers`, `rows`, `title` e `caption`, e cada expressão possui `expression`, `label` e `position`.
+Para preservar a leitura de cadernos impressos, use um bloco `image` no ponto exato em que a figura aparece no fluxo de leitura. `images[].position` continua sendo aceito para pacotes legados e imagens auxiliares, como imagens de resolução ou comentários.
 
-`sourceUrl` (ou `url`/`href`) pode guardar o endereço externo da origem da imagem; ele será mostrado como um link separado da imagem. `kind` pode ser `essential`, `illustrative` ou `shared`. O booleano `essential` indica que o arquivo é necessário para interpretar a questão. Um mesmo identificador pode ser referenciado por várias questões.
+Imagens aceitas: PNG, JPEG, WebP, GIF e SVG. O importador verifica o tipo real do arquivo, tamanho e CRC. Não reutilize o mesmo `assetId` para imagens diferentes.
 
-O ZIP deve conter os caminhos apontados no JSON. São aceitas imagens PNG, JPEG, WebP, GIF e SVG; o sistema verifica o conteúdo real do arquivo, o nome, o tamanho e o CRC. Arquivos de imagem extra não utilizados são ignorados. Não use imagens em base64 no JSON.
+## Alternativas multimodais
 
-### Classificação
+As alternativas também podem conter blocos. Use um array em `content` dentro de cada alternativa ou o mapa `alternativeContent`.
 
-`area` deve ser uma destas opções: `Linguagens`, `Ciências Humanas`, `Ciências da Natureza` ou `Exatas`.
+```json
+{
+  "alternatives": {
+    "A": { "content": [ { "type": "formula", "latex": "x^2 + 2x + 1 = 0" } ] },
+    "B": { "content": [ { "type": "image", "assetId": "ALT-B" } ] },
+    "C": "Alternativa textual normal."
+  },
+  "alternativeContent": {
+    "A": [ { "type": "formula", "latex": "x^2 + 2x + 1 = 0" } ],
+    "B": [ { "type": "image", "assetId": "ALT-B" } ]
+  },
+  "images": [
+    { "id": "ALT-B", "file": "imagens/ALT-B.webp", "position": "option:B", "alt": "Gráfico da alternativa B" }
+  ],
+  "answer": "B"
+}
+```
 
-Matérias reconhecidas inicialmente: Português, Literatura, Inglês, Espanhol, Artes, Educação Física, História, Geografia, Filosofia, Sociologia, Biologia, Química, Física e Matemática.
+O formato `alternativeContent` é útil para exportação interna do Grafia; os dois modos são aceitos na importação. As chaves precisam corresponder às alternativas existentes. A imagem também deve constar em `images[]` e no ZIP.
 
-`primaryTopic` é o assunto principal. `secondaryTopics` e `subtopics` são arrays de assuntos complementares. `prerequisites` e `skills` são arrays opcionais.
+## Texto-base compartilhado
 
-### Dificuldade e parâmetros TRI
+`textBases` continua permitindo compartilhar um mesmo material entre várias questões. Um texto-base aceita `content` como texto corrido ou `blocks` como lista estruturada. Questões vinculadas usam `textBaseId`.
 
-`difficulty` aceita `Fácil`, `Média` ou `Difícil`.
+```json
+{
+  "textBases": [
+    {
+      "id": "TB-001",
+      "title": "Texto I",
+      "blocks": [
+        { "type": "heading", "text": "A cidade contemporânea" },
+        { "type": "paragraph", "text": "Primeiro parágrafo..." },
+        { "type": "quote", "text": "Trecho citado..." }
+      ]
+    }
+  ]
+}
+```
 
-`triParameters` aceita `a` (discriminação), `b` (dificuldade) e `c` (acerto casual). A estimativa exibida pelo aplicativo é experimental, requer pelo menos cinco itens respondidos com parâmetros válidos e não representa a TRI oficial do ENEM. Não invente parâmetros: omita o objeto quando não houver calibração empírica confiável.
+Para compartilhar um material, crie um único objeto e informe o mesmo `textBaseId` nas questões vinculadas. O Grafia preserva a ordem original das questões e apresenta o material compartilhado uma vez por grupo na atividade.
 
-## Dois arquivos por importação
+## Imagens auxiliares e posições legadas
 
-1. `pacote-questoes.json` — obrigatório, contém dados e referências.
-2. `pacote-imagens.zip` — opcional, contém as imagens citadas em `images[].file`.
+Além dos blocos de imagem, o array `images` aceita posições antigas:
 
-Não incorpore imagens em base64 dentro do JSON. Isso mantém os lotes pequenos e permite que os recursos sejam compartilhados sem duplicar arquivos.
+- `before_statement`
+- `statement` ou `after_statement`
+- `after_text_base`
+- `option:A`, `option:B` etc.
+- `after_alternatives`
+- `explanation`
+- `alternative_explanation:A`, `alternative_comment:A` etc.
+
+Imagens de resolução geral e comentários individuais podem coexistir com imagens do enunciado e das alternativas no mesmo array `images` e no mesmo ZIP.
+
+## Tipos de questão e classificação
+
+O Grafia Questions continua aceitando:
+
+- `multiple_choice`: resposta única por alternativas; `answer` deve corresponder à chave da alternativa.
+- `true_false`: `answer` deve ser `V` ou `F`.
+- `assertion_set`: múltiplas afirmações; `statements` recebe objetos `{ "id": "S1", "text": "..." }` e `answer` contém a sequência V/F, por exemplo `"VFV"`.
+
+Questões discursivas continuam fora do escopo do banco objetivo atual. Não as converta automaticamente para múltipla escolha.
+
+`area` deve ser `Linguagens`, `Ciências Humanas`, `Ciências da Natureza` ou `Exatas`. Matérias reconhecidas: Português, Literatura, Inglês, Espanhol, Artes, Educação Física, História, Geografia, Filosofia, Sociologia, Biologia, Química, Física e Matemática.
+
+`primaryTopic` é o assunto principal. `secondaryTopics`, `subtopics`, `relatedSubjects`, `prerequisites` e `skills` são listas opcionais. `difficulty` aceita `Fácil`, `Média` ou `Difícil`.
+
+`triParameters` aceita `a`, `b` e `c`. Não invente parâmetros; omita o objeto quando não houver calibração empírica confiável. A estimativa do aplicativo é experimental e não representa a TRI oficial do ENEM.
+
+## Compatibilidade com schema 1.0.0
+
+O importador continua aceitando o formato anterior com `statement`, `alternatives` textuais e arrays posicionais `images`, `tables` e `equations`. Questões antigas não precisam ser reimportadas para continuarem funcionando. Ao exportar um pacote do banco, o Grafia gera `schemaVersion: "2.0.0"` e mantém os campos legados necessários, acrescentando `content`, `command` e `alternativeContent` quando existirem.
+
+## Integridade e limites
+
+- IDs de questão devem ser únicos e estáveis.
+- `assetId` deve identificar um arquivo de imagem único.
+- Blocos de imagem precisam apontar para `images[]`.
+- Links externos aceitam apenas HTTP e HTTPS.
+- Tipos de bloco não reconhecidos são sinalizados para revisão e não são executados como HTML.
+- Questões incompletas podem ser corrigidas ou removidas antes da importação.
+- O pacote usa JSON obrigatório e ZIP opcional; ZIP64 e ZIPs criptografados não são aceitos nesta versão.
+
+## Limite desta atualização
+
+O schema 2.0.0 e seu renderizador permitem representar blocos explicitamente. O reconhecimento automático de PDFs, OCR, interpretação de layout e reconstrução por IA ainda não estão implementados dentro do site. Para importar um PDF com alta fidelidade, o processo de digitalização externo deve produzir o JSON 2.0.0 e o ZIP de imagens, seguido da validação do Grafia.
