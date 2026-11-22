@@ -24,6 +24,9 @@ let answerByIdMap = new Map();
 let assetImageObserver = null;
 const assetLoadPromises = new Map();
 const questionSearchCache = new WeakMap();
+let activityNavigationFrame = null;
+let activityNavigationScrollHandler = null;
+let activityNavigationResizeHandler = null;
 const SUBJECTS = {
   'Linguagens': ['Português', 'Literatura', 'Inglês', 'Espanhol', 'Artes', 'Educação Física'],
   'Ciências Humanas': ['História', 'Geografia', 'Filosofia', 'Sociologia'],
@@ -68,7 +71,7 @@ function linkifyText(value) {
     if (!href) return escapeHTML(match);
     let host = '';
     try { host = new URL(href).hostname.replace(/^www\./i, ''); } catch {}
-    const label = markdownLabel ? escapeHTML(markdownLabel) : 'Abrir link';
+    const label = markdownLabel ? escapeHTML(markdownLabel) : escapeHTML(host || 'link externo');
     return `<a class="content-link" href="${safeAttr(href)}" target="_blank" rel="noopener noreferrer" title="${safeAttr(href)}" aria-label="Abrir referência externa: ${safeAttr(host || 'link')}"><span aria-hidden="true">↗</span><span>${label}</span></a>${escapeHTML(trailing)}`;
   });
 }
@@ -218,6 +221,7 @@ function clearAssetUrlCache() {
 
 function pageNavigate(page) {
   if (!page) return;
+  if (page !== 'activity' || state.currentActivity?.status !== 'running') unbindActivityNavigationSync();
   state.page = page;
   $$('.page').forEach(element => element.classList.toggle('active', element.dataset.pageId === page));
   $$('.nav-item[data-page]').forEach(element => element.classList.toggle('active', element.dataset.page === page));
@@ -770,6 +774,89 @@ function renderQuestionFeedback(question, answer, config, final = false) {
   return `<div class="answer-feedback ${reveal ? kind : 'neutral'}">${reveal ? `<b>${correct ? 'Resposta correta' : 'Resposta incorreta'}</b> · Gabarito: ${escapeHTML(answerLabel)}` : '<b>Comentário disponível</b>'}${explanation}</div>`;
 }
 
+function navigationResponseLabel(question, response) {
+  if (response == null || response === '') return '';
+  const value = String(response).trim().toUpperCase();
+  if (question?.type === 'assertion_set') {
+    const cells = value.split('').map(letter => letter === 'V' || letter === 'F' ? letter : '·');
+    return cells.every(letter => letter === '·') ? '' : cells.join('');
+  }
+  if (question?.type === 'true_false') return value === 'V' || value === 'F' ? value : '';
+  return /^[A-Z]$/.test(value) ? value : '';
+}
+function updateNavigationAnswer(questionId) {
+  const button = document.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
+  const question = questionById(questionId);
+  if (!button || !question) return;
+  const answer = state.activityAnswers.get(questionId);
+  const label = navigationResponseLabel(question, answer?.response);
+  const labelNode = button.querySelector('.exam-number-answer');
+  if (label) {
+    if (labelNode) labelNode.textContent = label;
+    else button.insertAdjacentHTML('beforeend', `<span class="exam-number-answer">${escapeHTML(label)}</span>`);
+    button.setAttribute('aria-label', `Questão ${button.querySelector('.exam-number-index')?.textContent || ''}, resposta marcada ${label}`);
+  } else {
+    labelNode?.remove();
+    button.setAttribute('aria-label', `Questão ${button.querySelector('.exam-number-index')?.textContent || ''}`);
+  }
+  button.classList.toggle('answered', responseIsComplete(question, answer?.response));
+  button.classList.toggle('review-mark', Boolean(answer?.markedForReview));
+}
+function keepNavigationItemVisible(button, behavior = 'smooth') {
+  const grid = $('#examNumberGrid');
+  if (!button || !grid) return;
+  const gridRect = grid.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+  const itemTop = buttonRect.top - gridRect.top + grid.scrollTop;
+  const itemBottom = itemTop + buttonRect.height;
+  const visibleTop = grid.scrollTop;
+  const visibleBottom = visibleTop + grid.clientHeight;
+  if (itemTop < visibleTop || itemBottom > visibleBottom) {
+    const nextTop = Math.max(0, itemTop - Math.max(0, (grid.clientHeight - button.offsetHeight) / 2));
+    grid.scrollTo({ top: nextTop, behavior });
+  }
+}
+function syncActivityNavigationFromScroll() {
+  activityNavigationFrame = null;
+  if (!state.currentActivity || state.currentActivity.status !== 'running' || state.page !== 'activity') return;
+  const cards = $$('[data-question-card]');
+  if (!cards.length) return;
+  const anchor = Math.min(Math.max(110, window.innerHeight * .24), 230);
+  let activeCard = cards.find(card => {
+    const rect = card.getBoundingClientRect();
+    return rect.bottom > anchor && rect.top < window.innerHeight;
+  });
+  if (!activeCard) activeCard = cards.find(card => card.getBoundingClientRect().bottom > 0) || cards[cards.length - 1];
+  const questionId = activeCard?.dataset.questionCard;
+  if (!questionId) return;
+  $$('.exam-number.current').forEach(button => button.classList.remove('current'));
+  const button = document.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
+  if (button) {
+    button.classList.add('current');
+    keepNavigationItemVisible(button, 'auto');
+  }
+}
+function scheduleActivityNavigationSync() {
+  if (activityNavigationFrame != null) return;
+  activityNavigationFrame = requestAnimationFrame(syncActivityNavigationFromScroll);
+}
+function unbindActivityNavigationSync() {
+  if (activityNavigationScrollHandler) window.removeEventListener('scroll', activityNavigationScrollHandler);
+  if (activityNavigationResizeHandler) window.removeEventListener('resize', activityNavigationResizeHandler);
+  activityNavigationScrollHandler = null;
+  activityNavigationResizeHandler = null;
+  if (activityNavigationFrame != null) cancelAnimationFrame(activityNavigationFrame);
+  activityNavigationFrame = null;
+}
+function bindActivityNavigationSync() {
+  unbindActivityNavigationSync();
+  activityNavigationScrollHandler = scheduleActivityNavigationSync;
+  activityNavigationResizeHandler = scheduleActivityNavigationSync;
+  window.addEventListener('scroll', activityNavigationScrollHandler, { passive: true });
+  window.addEventListener('resize', activityNavigationResizeHandler, { passive: true });
+  scheduleActivityNavigationSync();
+}
+
 async function renderSession() {
   if (!state.currentActivity) return;
   const activity = state.currentActivity;
@@ -780,7 +867,7 @@ async function renderSession() {
     const answer = state.activityAnswers.get(q.id);
     const textBase = textBaseById(q.textBaseId);
     return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${hasExplanationContent(q) ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem" data-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, activity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
-  }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid">${questions.map((q,index) => `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${state.activityAnswers.get(q.id)?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button">${index + 1}</button>`).join('')}</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
+  }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid" id="examNumberGrid">${questions.map((q,index) => { const answer = state.activityAnswers.get(q.id); const navAnswer = navigationResponseLabel(q, answer?.response); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${answer?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index + 1}${navAnswer ? `, resposta marcada ${safeAttr(navAnswer)}` : ''}"><span class="exam-number-index">${index + 1}</span>${navAnswer ? `<span class="exam-number-answer">${escapeHTML(navAnswer)}</span>` : ''}</button>`; }).join('')}</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('#activitySession').innerHTML = html;
   $('.activity-layout').classList.add('hidden');
@@ -792,6 +879,7 @@ async function renderSession() {
     applyTextMarks($(`[data-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement');
     applyTextMarks($(`[data-textbase-for="${CSS.escape(question.id)}"]`), marks, 'textBase');
   }
+  bindActivityNavigationSync();
   if (activity.config.timerEnabled) updateTimerLabel();
 }
 async function saveQuestionResponse(questionId) {
@@ -820,8 +908,7 @@ async function saveQuestionResponse(questionId) {
   const count = state.currentActivity.questionIds.reduce((total, id) => total + answerCount(id), 0);
   $('#examAnsweredCount').textContent = `${count} de ${state.currentActivity.questionIds.length} respondidas`;
   $('#examProgressBar').style.width = `${count / state.currentActivity.questionIds.length * 100}%`;
-  const navButton = document.querySelector(`.exam-number[data-jump="${CSS.escape(questionId)}"]`);
-  if (navButton) navButton.classList.toggle('answered', complete);
+  updateNavigationAnswer(questionId);
 }
 async function setConfidence(questionId, confidence) {
   const old = state.activityAnswers.get(questionId) || { id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id, questionId, response: '' };
@@ -928,6 +1015,7 @@ async function finishActivity(timeExpired = false) {
   await renderResult(completed);
 }
 async function renderResult(activity) {
+  unbindActivityNavigationSync();
   const questions = activity.questionIds.map(questionById).filter(Boolean);
   await loadActivityAnswers(activity.id);
   const result = activity.result || {};
@@ -2258,7 +2346,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.5.5');
+  await setSetting(state.db, 'appVersion', '1.5.6');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2468,7 +2556,15 @@ document.addEventListener('click', async event => {
       const previous = ids.slice(0,targetIndex).find(id=>!answerCount(id));
       if (previous) return toast('Responda às questões anteriores para seguir a navegação sequencial.');
     }
-    document.getElementById(`exam-q-${CSS.escape(jump.dataset.jump)}`)?.scrollIntoView({behavior:'smooth',block:'start'}); return;
+    const targetQuestion = document.getElementById(`exam-q-${CSS.escape(jump.dataset.jump)}`);
+    if (targetQuestion) {
+      $$('.exam-number.current').forEach(button => button.classList.remove('current'));
+      jump.classList.add('current');
+      keepNavigationItemVisible(jump);
+      targetQuestion.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'});
+      window.setTimeout(scheduleActivityNavigationSync, 360);
+    }
+    return;
   }
   const reviewFilter = event.target.closest('[data-review-filter]');
   if (reviewFilter) { state.reviewFilter = reviewFilter.dataset.reviewFilter; renderReviews(); return; }

@@ -80,7 +80,7 @@ async function ensureInitialSettings(db) {
     if (!currentReq.result) store.put({ key: 'databaseId', value: crypto.randomUUID() });
     const versionReq = store.get('appVersion');
     versionReq.onsuccess = () => {
-      if (versionReq.result?.value !== '1.5.5') store.put({ key: 'appVersion', value: '1.5.5' });
+      if (versionReq.result?.value !== '1.5.6') store.put({ key: 'appVersion', value: '1.5.6' });
     };
   };
   await done;
