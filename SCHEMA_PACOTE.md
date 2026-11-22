@@ -231,7 +231,7 @@ O formato `alternativeContent` é útil para exportação interna do Grafia; os 
 }
 ```
 
-Para compartilhar um material, crie um único objeto e informe o mesmo `textBaseId` nas questões vinculadas. O Grafia preserva a ordem original das questões e apresenta o material compartilhado uma vez por grupo na atividade.
+Para compartilhar um material, crie um único objeto e informe o mesmo `textBaseId` nas questões vinculadas. O Grafia preserva a ordem original das questões e apresenta o material compartilhado uma vez por grupo na atividade. Esse é o formato canônico. Para compatibilidade, a importação também consegue recuperar vínculos declarados no próprio texto-base por `questionIds` ou `questions`; após a leitura, as relações são normalizadas para `question.textBaseId`. A prévia mantém disponíveis os textos-base já armazenados no banco, mesmo quando eles não precisam ser gravados novamente.
 
 ## Imagens auxiliares e posições legadas
 

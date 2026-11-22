@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.7.2
+# Grafia Questions — versão 1.7.3
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -195,3 +195,12 @@ Corrige a validação de questões cujo enunciado é fornecido por um `textBaseI
 ## Atualização 1.7.2 — Validação de textos-base compartilhados
 
 A prévia de importação agora reconhece um texto-base compartilhado válido como parte do enunciado da questão. Questões vinculadas por `textBaseId` deixam de ser marcadas incorretamente como incompletas. A validação também confirma que o texto-base possui conteúdo textual ou blocos estruturados.
+
+
+## Atualização 1.7.3 — Relações de texto-base e identidade visual
+
+- A prévia mantém disponíveis os textos-base já existentes no banco, separando os registros resolvidos daqueles que precisam ser gravados.
+- O importador reconhece vínculos declarados tanto em `question.textBaseId` quanto em `textBase.questionIds`/`textBase.questions`, além de aliases comuns do campo de vínculo.
+- A validação verifica se o texto-base referenciado realmente existe e contém texto ou blocos estruturados.
+- Questões sem enunciado próprio exibem uma prévia explícita do texto-base compartilhado no banco de questões.
+- A paleta mantém o vermelho clássico como acento, mas reduz sua saturação, brilho e presença nos fundos, painéis e botões.
