@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.6.3
+# Grafia Questions — versão 1.6.4
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -191,4 +191,4 @@ A versão 1.6.2 adota a identidade monocromática Royal Charcoal em toda a inter
 A versão 1.6.2 usa a paleta monocromática Royal Charcoal, com fundos carvão, superfícies grafite, cinzas ardósia e texto claro. Os ícones PWA também usam escala de cinza.
 
 
-A versão 1.6.3 adota a identidade visual Forest Glass aprovada: fundos verde-profundo, superfícies de vidro verde, acentos sálvia e texto menta. Foram renovados o fundo atmosférico, os cartões, a barra superior, a navegação, os botões, os estados das alternativas, os indicadores, os ícones do PWA e a cor do navegador. O banco local, a estrutura de dados e os formatos JSON + ZIP permanecem inalterados.
+A versão 1.6.4 adota a identidade visual Forest Glass aprovada: fundos verde-profundo, superfícies de vidro verde, acentos sálvia e texto menta. Foram renovados o fundo atmosférico, os cartões, a barra superior, a navegação, os botões, os estados das alternativas, os indicadores, os ícones do PWA e a cor do navegador. O banco local, a estrutura de dados e os formatos JSON + ZIP permanecem inalterados.
