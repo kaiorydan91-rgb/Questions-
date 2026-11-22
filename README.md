@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.6.1
+# Grafia Questions — versão 1.6.2
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -182,3 +182,10 @@ A barra inferior voltou a exibir ícones próprios para as seis áreas. O indica
 
 
 A versão 1.6.1 substitui a paleta Cool Steel pela paleta Holst (Deep Navy, Slate Blue, Sage, Beige e Ivory) em toda a interface, atualiza as cores do PWA e renova o cache para garantir a entrega dos novos estilos.
+
+
+A versão 1.6.2 adota a identidade monocromática Royal Charcoal em toda a interface e nos ícones do PWA. A atualização não altera o banco local nem os formatos de importação.
+
+## Identidade visual
+
+A versão 1.6.2 usa a paleta monocromática Royal Charcoal, com fundos carvão, superfícies grafite, cinzas ardósia e texto claro. Os ícones PWA também usam escala de cinza.
