@@ -10,7 +10,7 @@ O JSON deve possuir:
 - `packageId`: identificador estável do pacote, que deve ser mantido ao reanalisar/reimportar o mesmo conjunto.
 - `packageName`: nome legível do pacote.
 - `source`: procedência geral (instituição, prova, ano ou origem). Pode incluir `url`, `link` ou `href` para a página da fonte; o endereço é apresentado em um bloco visual separado do enunciado. A questão também aceita `sourceUrl`/`sourceLink` ou `links`/`references` como alternativas.
-- `textBases`: textos-base compartilhados por questões.
+- `textBases`: textos-base compartilhados por questões. Questões vinculadas devem apontar para o mesmo `textBaseId`; durante a importação, textos com conteúdo normalizado idêntico e a mesma prova/origem também podem ser unificados automaticamente, mesmo que tenham IDs diferentes.
 - `questions`: lista de questões.
 - `sourceExam` (opcional): metadados da prova de origem, incluindo título, descrição e ordem original. `sourceExam.originalOrder` deve conter os IDs das questões na sequência da prova (não a ordem de classificação por matéria); o aplicativo preserva essa ordem e também mantém cada questão no banco geral.
 
@@ -68,7 +68,9 @@ Esta versão não aceita questões discursivas. Se o material de origem contiver
 - `true_false`: uma afirmação; `answer` deve ser `V` ou `F`.
 - `assertion_set`: múltiplas afirmações; use `statements` como array de objetos `{ "id": "S1", "text": "..." }` e `answer` como sequência de `V` e `F`, por exemplo `"VFV"`.
 
-Questões ligadas a textos-base usam `textBaseId`. Os textos-base ficam no array `textBases`, com `id`, `title`, `content` e `source` opcionais. Uma questão pode indicar assuntos secundários (`secondaryTopics`), subassuntos (`subtopics`), matérias relacionadas (`relatedSubjects`), pré-requisitos (`prerequisites`) e habilidades (`skills`). `classificationConfidence` é um número entre 0 e 1; `classificationNote` registra ressalvas ou justificativas da classificação. `sourceQuestionNumber` preserva a numeração original.
+Questões ligadas a textos-base usam `textBaseId`. Os textos-base ficam no array `textBases`, com `id`, `title`, `content` e `source` opcionais. Para compartilhar um texto entre várias questões, crie **um único objeto** em `textBases` e informe o mesmo `textBaseId` em todas as questões vinculadas; não repita o texto longo dentro de cada `statement`. Na atividade, o texto é exibido uma vez antes da primeira questão do grupo, e as seguintes oferecem o atalho **Voltar ao texto-base**. `sourceQuestionNumber` deve preservar a numeração original para que as questões do grupo sejam apresentadas na sequência da prova. Durante a importação, textos-base com conteúdo normalizado idêntico e a mesma origem podem ser unificados mesmo que tenham IDs diferentes. Essa detecção depende da existência de objetos em `textBases`; conteúdo longo duplicado apenas dentro de `statement` não é separado automaticamente.
+
+Uma questão pode indicar assuntos secundários (`secondaryTopics`), subassuntos (`subtopics`), matérias relacionadas (`relatedSubjects`), pré-requisitos (`prerequisites`) e habilidades (`skills`). `classificationConfidence` é um número entre 0 e 1; `classificationNote` registra ressalvas ou justificativas da classificação.
 
 ### Imagens
 

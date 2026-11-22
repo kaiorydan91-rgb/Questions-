@@ -1,11 +1,18 @@
-# Grafia Questions — v1.6.1
+# Grafia Questions — versão 1.6.1
 
-## Correções de ZIP e importação
-- Corrigida a data DOS gravada no cabeçalho local e no diretório central dos ZIPs exportados. A data agora é 01/01/1980, válida pelo padrão ZIP, em vez do valor inválido 00/00/1980.
-- O leitor ZIP valida a posição e o tamanho do diretório central, o fim do arquivo, arquivos divididos em volumes, campos ZIP64, flags suportadas, nomes, cabeçalhos locais, descritores de dados, limites, sobreposição de registros, tamanho extraído e CRC.
-- A análise em segundo plano fecha a conexão temporária do IndexedDB em todos os caminhos de execução.
-- A interface comunica falhas de resposta do Worker com mensagens mais claras.
+## Identidade visual: paleta Holst
+
+- Fundo principal Deep Navy `#0D1B2A`.
+- Superfícies e painéis Navy `#1B263B`.
+- Cartões e elementos Slate Blue `#415A77`.
+- Estados selecionados, progresso e sucesso Sage `#778D7A`.
+- Acentos, contornos e texto secundário Beige `#D4C4A8`.
+- Texto principal Ivory `#F4F1DE`.
+- Paleta aplicada a fundos, cartões, navegação, alternativas, botões, formulários, progresso, estados e feedbacks.
+- Ícones `icon-192.png` e `icon-512.png` recoloridos para combinar com a paleta.
+- Atualizados `theme-color`, cores de fundo do manifesto PWA e versão de cache do service worker para `v1.6.1`.
 
 ## Compatibilidade
-- Cache do Service Worker atualizado para v1.6.1 para forçar a instalação dos arquivos corrigidos.
-- Nenhuma mudança estrutural no IndexedDB e nenhuma migração destrutiva. Questões, imagens e atividades locais são preservadas.
+
+- Nenhuma alteração no IndexedDB ou no formato JSON + ZIP.
+- Nenhuma alteração no modelo de questões, grupos de texto-base ou geração de atividades.
