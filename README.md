@@ -1,4 +1,4 @@
-# Grafia Questions — versão 1.5.5
+# Grafia Questions — versão 1.5.6
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
@@ -51,7 +51,7 @@ A importação verifica a estrutura, IDs estáveis e únicos, referências de im
 
 ## Histórico da atualização
 
-Consulte `CHANGELOG_v1.5.5.md` para as mudanças mais recentes e os changelogs anteriores para o histórico de versões.
+Consulte `CHANGELOG_v1.5.6.md` para as mudanças mais recentes e os changelogs anteriores para o histórico de versões.
 
 ## Estrutura do projeto
 
@@ -82,12 +82,13 @@ CHANGELOG_v1.5.2.md
 CHANGELOG_v1.5.3.md
 CHANGELOG_v1.5.4.md
 CHANGELOG_v1.5.5.md
+CHANGELOG_v1.5.6.md
 README.md
 ```
 
 ## Evolução das versões anteriores
 
-A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente. A versão 1.5.0 acrescenta histórico completo e gestão segura de pacotes, tarefas pendentes, seleção de questões de vários pacotes, desempenho com filtros combinados por período/área/matéria/assunto, análise por dificuldade, autodiagnóstico dos erros e recomendações de estudo. A versão 1.5.1 permite substituir duplicatas por uma versão importada menos completa, com histórico e restauração das versões anteriores. A versão 1.5.2 faz a exclusão de pacotes remover também todas as questões vinculadas e limpa questões órfãs deixadas por exclusões feitas em versões anteriores. A versão 1.5.3 permite pausar várias atividades, sair para criar novas tarefas e retomar cada uma com respostas e tempo preservados. A versão 1.5.4 permite limpar uma resposta tocando novamente na alternativa marcada, mantém a tipografia ao grifar e suaviza o rótulo “Comando”. A versão 1.5.5 permite inserir imagens na resolução geral e nos comentários individuais das alternativas, usando o mesmo JSON + ZIP.
+A versão 1.1.0 introduziu filtros combináveis por área/matéria, catálogo derivado das questões, seleção de trechos, marcação visual de alternativas e comentários individuais. Na versão 1.3.0, o seletor de assuntos foi ampliado com a lista de 100 tópicos do Grafia Study, a marcação de alternativas passou a funcionar por pressão longa e os grifos foram estendidos ao texto-base. A versão 1.4.0 mantém o seletor limitado aos 100 assuntos fixos e aos assuntos personalizados salvos manualmente. A versão 1.5.0 acrescenta histórico completo e gestão segura de pacotes, tarefas pendentes, seleção de questões de vários pacotes, desempenho com filtros combinados por período/área/matéria/assunto, análise por dificuldade, autodiagnóstico dos erros e recomendações de estudo. A versão 1.5.1 permite substituir duplicatas por uma versão importada menos completa, com histórico e restauração das versões anteriores. A versão 1.5.2 faz a exclusão de pacotes remover também todas as questões vinculadas e limpa questões órfãs deixadas por exclusões feitas em versões anteriores. A versão 1.5.3 permite pausar várias atividades, sair para criar novas tarefas e retomar cada uma com respostas e tempo preservados. A versão 1.5.4 permite limpar uma resposta tocando novamente na alternativa marcada, mantém a tipografia ao grifar e suaviza o rótulo “Comando”. A versão 1.5.5 permite inserir imagens na resolução geral e nos comentários individuais das alternativas, usando o mesmo JSON + ZIP. A versão 1.5.6 aplica a paleta Forest, amplia a tela de resolução em computadores, sincroniza a navegação lateral com a rolagem e registra a alternativa escolhida abaixo do número da questão.
 
 ## Atualização 1.0.4
 
