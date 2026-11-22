@@ -288,6 +288,19 @@ function fillSubjectSelect(select, area = '') {
   select.innerHTML = `<option value="">Todas as matérias</option>${available.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join('')}`;
   if (available.includes(selected)) select.value = selected;
 }
+function questionPreviewText(question) {
+  if (question.contentBlocks?.length) {
+    return escapeHTML(question.contentBlocks.map(block => block.text || (block.stanzas || []).flat().join(' ')).join(' ').slice(0, 220));
+  }
+  if (question.statement) return richText(question.statement);
+  if (question.textBaseId) {
+    const base = textBaseById(question.textBaseId);
+    const preview = String(base?.content || (base?.blocks || []).map(block => [block.text, ...(block.stanzas || []).flat(), ...(block.items || []).map(item => item.text)].filter(Boolean).join(' ')).join(' ') || 'Material compartilhado').replace(/\s+/g, ' ').trim();
+    return `<span class="shared-base-snippet">Texto-base compartilhado · ${escapeHTML(preview.slice(0, 180))}</span>`;
+  }
+  return '<span class="muted">Enunciado não informado</span>';
+}
+
 function renderBank() {
   fillSubjectSelect($('#filterSubject'), $('#filterArea').value);
   const search = normalizeSearch($('#bankSearch').value);
@@ -310,7 +323,7 @@ function renderBank() {
     $('#bankPagination').innerHTML = '';
     return;
   }
-  $('#bankList').innerHTML = visible.map(q => `<article class="question-row"><div class="question-number">${escapeHTML(String(q.sourceQuestionNumber || '•'))}</div><div><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${escapeHTML(q.primaryTopic || 'Sem assunto')}</span><span class="tag">${escapeHTML(q.difficulty || 'Sem nível')}</span>${hasExplanationContent(q) ? '<span class="tag">Comentada</span>' : '<span class="tag">Gabarito</span>'}${q.images?.length ? '<span class="tag">Imagem</span>' : ''}${(q.relatedSubjects||[]).map(item=>`<span class="tag">Interdisciplinar: ${escapeHTML(item)}</span>`).join('')}${q.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(q.classificationConfidence*100)}% confiança</span>` : ''}</div><h3>${escapeHTML(q.id)}</h3><p>${q.contentBlocks?.length ? escapeHTML((q.contentBlocks.map(block=>block.text || (block.stanzas || []).flat().join(' ')).join(' ')).slice(0,220)) : richText(q.statement)}</p>${renderQuestionReferences(q)}</div><div class="row-actions"><button class="icon-action ${q.favorite ? 'active' : ''}" data-action="favorite" data-id="${safeAttr(q.id)}" title="${q.favorite ? 'Remover favorita' : 'Favoritar'}">${q.favorite ? '★' : '☆'}</button><button class="icon-action" data-open-question="${safeAttr(q.id)}" title="Abrir questão">↗</button></div></article>`).join('');
+  $('#bankList').innerHTML = visible.map(q => `<article class="question-row"><div class="question-number">${escapeHTML(String(q.sourceQuestionNumber || '•'))}</div><div><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${escapeHTML(q.primaryTopic || 'Sem assunto')}</span><span class="tag">${escapeHTML(q.difficulty || 'Sem nível')}</span>${hasExplanationContent(q) ? '<span class="tag">Comentada</span>' : '<span class="tag">Gabarito</span>'}${q.images?.length ? '<span class="tag">Imagem</span>' : ''}${(q.relatedSubjects||[]).map(item=>`<span class="tag">Interdisciplinar: ${escapeHTML(item)}</span>`).join('')}${q.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(q.classificationConfidence*100)}% confiança</span>` : ''}</div><h3>${escapeHTML(q.id)}</h3><p>${questionPreviewText(q)}</p>${renderQuestionReferences(q)}</div><div class="row-actions"><button class="icon-action ${q.favorite ? 'active' : ''}" data-action="favorite" data-id="${safeAttr(q.id)}" title="${q.favorite ? 'Remover favorita' : 'Favoritar'}">${q.favorite ? '★' : '☆'}</button><button class="icon-action" data-open-question="${safeAttr(q.id)}" title="Abrir questão">↗</button></div></article>`).join('');
   $('#bankPagination').innerHTML = pageCount > 1 ? `<span class="fine-print">Página ${state.bankPage} de ${pageCount}</span><div class="pagination-actions"><button class="button secondary" data-bank-page="${Math.max(1,state.bankPage-1)}" ${state.bankPage===1?'disabled':''}>Anterior</button><button class="button secondary" data-bank-page="${Math.min(pageCount,state.bankPage+1)}" ${state.bankPage===pageCount?'disabled':''}>Próxima</button></div>` : '';
 }
 
@@ -943,7 +956,9 @@ function renderQuestionComposition(question) {
   }
   const before = `${renderQuestionImages(question,['after_text_base','after-text-base'])}${renderQuestionTables(question,['after_text_base','after-text-base'])}${renderQuestionEquations(question,['after_text_base','after-text-base'])}${renderQuestionImages(question,['before_statement','before-statement'])}`;
   const after = `${renderQuestionImages(question,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(question,['statement','after_statement'])}${renderQuestionEquations(question,['statement','after_statement'])}`;
-  return `${before}<div class="exam-stem" data-statement-for="${safeAttr(question.id)}">${renderQuestionBodyContent(question)}</div>${after}${renderQuestionReferences(question)}`;
+  const body = renderQuestionBodyContent(question);
+  const stem = body ? `<div class="exam-stem" data-statement-for="${safeAttr(question.id)}">${body}</div>` : '';
+  return `${before}${stem}${after}${renderQuestionReferences(question)}`;
 }
 function renderOptionContent(question, key, value) {
   const blocks = question.alternativeContent?.[String(key).toUpperCase()];
@@ -2058,6 +2073,7 @@ async function analyzeImport() {
 function hasValidSharedTextBase(q, draft) {
   if (!q?.textBaseId) return false;
   const base = (draft?.textBases || []).find(item => item.id === q.textBaseId)
+    || (draft?.textBasesToWrite || []).find(item => item.id === q.textBaseId)
     || (state.data.textBases || []).find(item => item.id === q.textBaseId);
   return Boolean(base && (String(base.content || '').trim() || (Array.isArray(base.blocks) && base.blocks.length)));
 }
@@ -2079,7 +2095,8 @@ function validateDraftQuestion(q, draft) {
     if (!/^[VF]+$/i.test(expected) || expected.length !== (q.statements || []).length) issues.push('Gabarito das afirmações incompleto');
   }
   if (q.type === 'true_false' && !['V','F','TRUE','FALSE','VERDADEIRO','FALSO'].includes(String(q.answer).toUpperCase())) issues.push('Gabarito V/F inválido');
-  if (q.textBaseId && !draft.textBases.some(item => item.id === q.textBaseId) && !state.data.textBases.some(item => item.id === q.textBaseId)) issues.push('Texto-base ausente');
+  if (q.textBaseId && !hasValidSharedTextBase(q, draft)) issues.push(`Texto-base ausente ou sem conteúdo: ${q.textBaseId}`);
+  if (q._textBaseLinkConflict) issues.push('A questão foi vinculada a mais de um texto-base. Revise a relação antes de importar.');
   for (const image of q.images || []) {
     if (draft.invalidAssetIds?.includes(image.assetId)) issues.push(`Imagem inválida ou corrompida: ${image.fileName || image.assetId}`);
     else if (!draft.assets.some(item => item.id === image.assetId) && !state.data.assets.some(item => item.id === image.assetId)) issues.push(`Imagem ausente: ${image.fileName || image.assetId}`);
@@ -2222,7 +2239,7 @@ async function commitImport() {
   const usedAssetIds = new Set(draft.questions.flatMap(q => (q.images || []).map(image => image.assetId)));
   const usedAssets = draft.assets.filter(asset => usedAssetIds.has(asset.id));
   const usedAssetIdsForBlobs = new Set(usedAssets.map(asset => asset.id));
-  const records = { questions: questionsToWrite, assets: usedAssets, assetBlobs: (draft.assetBlobs || []).filter(asset => usedAssetIdsForBlobs.has(asset.id)), textBases: draft.textBases, imports: [importRecord] };
+  const records = { questions: questionsToWrite, assets: usedAssets, assetBlobs: (draft.assetBlobs || []).filter(asset => usedAssetIdsForBlobs.has(asset.id)), textBases: draft.textBasesToWrite || draft.textBases, imports: [importRecord] };
   if (draft.sourceExam) {
     const exam = draft.sourceExam;
     const requestedOrder = Array.isArray(exam.originalOrder) ? exam.originalOrder : (Array.isArray(exam.questionIds) ? exam.questionIds : draft.questions.map(q=>q.id));
@@ -2617,7 +2634,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.7.1');
+  await setSetting(state.db, 'appVersion', '1.7.3');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');

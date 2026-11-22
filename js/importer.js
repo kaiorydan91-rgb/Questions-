@@ -66,6 +66,25 @@ function normalizeExplanationMap(raw) {
   return Object.fromEntries(Object.entries(raw).map(([key, value]) => [String(key).toUpperCase(), str(typeof value === 'object' && value ? value.text ?? value.comment ?? value.explanation : value)]).filter(([, value]) => value));
 }
 
+function normalizeTextBaseReference(raw) {
+  const value = raw?.textBaseId ?? raw?.text_base_id ?? raw?.textoBaseId ?? raw?.texto_base_id
+    ?? raw?.sharedTextBaseId ?? raw?.shared_text_base_id ?? raw?.sharedTextId ?? raw?.shared_text_id
+    ?? raw?.textBase ?? raw?.sharedTextBase ?? raw?.textoBase ?? '';
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return str(value.id ?? value.textBaseId ?? value.text_base_id ?? value.sharedTextBaseId);
+  }
+  return str(value);
+}
+
+function linkedQuestionIdsFromTextBase(item) {
+  const raw = item?.questionIds ?? item?.question_ids ?? item?.linkedQuestionIds
+    ?? item?.linked_question_ids ?? item?.questions ?? item?.questoes ?? [];
+  return toArray(raw).map(value => {
+    if (value && typeof value === 'object') return str(value.id ?? value.questionId ?? value.question_id);
+    return str(value);
+  }).filter(Boolean);
+}
+
 function normalizeQuestion(raw, packageMeta = {}) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Há um item de questão que não é um objeto válido.');
   const subject = str(raw.subject ?? raw.materia);
@@ -129,7 +148,7 @@ function normalizeQuestion(raw, packageMeta = {}) {
     alternativeExplanations: normalizeExplanationMap(raw.alternativeExplanations ?? raw.explanationsByAlternative ?? raw.comentariosAlternativas),
     tables: Array.isArray(raw.tables ?? raw.tabelas) ? (raw.tables ?? raw.tabelas).map(table => ({ title: str(table.title ?? table.titulo), caption: str(table.caption ?? table.legenda), headers: Array.isArray(table.headers ?? table.cabecalho) ? (table.headers ?? table.cabecalho).map(str) : [], rows: Array.isArray(table.rows ?? table.linhas) ? (table.rows ?? table.linhas).map(row => Array.isArray(row) ? row.map(str) : []) : [], position: str(table.position ?? table.posicao) || 'after_statement' })) : [],
     equations: Array.isArray(raw.equations ?? raw.formulas) ? (raw.equations ?? raw.formulas).map(item => ({ label: str(item.label ?? item.rotulo), expression: str(item.expression ?? item.latex ?? item.formula ?? item.expressao), position: str(item.position ?? item.posicao) || 'after_statement' })) : [],
-    textBaseId: str(raw.textBaseId ?? raw.text_base_id ?? raw.textoBaseId),
+    textBaseId: normalizeTextBaseReference(raw),
     images,
     links: toArray(raw.links ?? raw.references ?? raw.referencias).map(item => typeof item === 'string' ? item : ({ url: str(item?.url ?? item?.href ?? item?.link), label: str(item?.label ?? item?.title ?? item?.name) })).filter(item => typeof item === 'string' ? item : item.url),
     sourceUrl: str(raw.sourceUrl ?? raw.sourceURL ?? raw.sourceLink ?? raw.referenceUrl),
@@ -236,7 +255,8 @@ function validateQuestion(question, index, textBaseIds, assetMap, invalidAssetId
     if (!/^[VF]+$/i.test(expected) || expected.length !== question.statements.length) issues.push('O gabarito das afirmações precisa informar V/F para cada afirmação.');
   }
   if (question.type === 'true_false' && !['V','F','TRUE','FALSE','VERDADEIRO','FALSO'].includes(String(question.answer).toUpperCase())) issues.push('O gabarito de verdadeiro ou falso precisa ser V ou F.');
-  if (question.textBaseId && !textBaseIds.has(question.textBaseId)) issues.push(`Texto-base ${question.textBaseId} não encontrado no pacote.`);
+  if (question.textBaseId && !textBaseIds.has(question.textBaseId)) issues.push(`Texto-base ${question.textBaseId} não encontrado ou sem conteúdo no pacote/banco.`);
+  if (question._textBaseLinkConflict) issues.push('A questão foi vinculada a mais de um texto-base. Revise a relação antes de importar.');
   for (const image of question.images) {
     if (invalidAssetIds.has(image.assetId)) issues.push(`O arquivo vinculado à imagem ${image.assetId} não é uma imagem compatível ou está corrompido.`);
     else if (!image.fileName && !assetMap.has(image.assetId)) issues.push(`A imagem ${image.assetId} não possui arquivo identificado.`);
@@ -321,10 +341,31 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
   const textBasesRaw = pkg.textBases ?? pkg.text_bases ?? pkg.textosBase ?? [];
   if (!Array.isArray(textBasesRaw)) throw new Error('A lista textBases precisa ser um array.');
   if (textBasesRaw.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw new Error('Há um texto-base que não está em um formato de objeto válido.');
-  let textBases = textBasesRaw.map(item => ({ id: str(item.id), title: str(item.title ?? item.titulo), content: str(typeof item.content === 'string' ? item.content : item.text ?? item.conteudo), blocks: normalizeBlocks(item.blocks ?? item.contentBlocks ?? (Array.isArray(item.content) ? item.content : null)), source: item.source && typeof item.source === 'object' && Object.keys(item.source).length ? item.source : packageMeta.source, updatedAt: new Date().toISOString() }));
+  let textBases = textBasesRaw.map(item => ({
+    id: str(item.id ?? item.textBaseId ?? item.text_base_id),
+    title: str(item.title ?? item.titulo ?? item.label),
+    content: str(typeof item.content === 'string' ? item.content : item.text ?? item.conteudo),
+    blocks: normalizeBlocks(item.blocks ?? item.contentBlocks ?? (Array.isArray(item.content) ? item.content : null)),
+    source: item.source && typeof item.source === 'object' && Object.keys(item.source).length ? item.source : packageMeta.source,
+    updatedAt: new Date().toISOString()
+  }));
   if (textBases.some(item => !item.id || (!item.content && !item.blocks.length))) throw new Error('Há um texto-base sem identificador ou conteúdo.');
   const initialTextBaseIds = new Set(textBases.map(item => item.id));
   if (initialTextBaseIds.size !== textBases.length) throw new Error('Há identificadores repetidos na lista de textos-base do pacote.');
+  // The relationship may be expressed on either side of the schema: questions can
+  // point to textBaseId, or a text-base can enumerate questionIds. Normalize both
+  // forms into the same question.textBaseId relation before validating anything.
+  const questionsById = new Map(questions.map(question => [question.id, question]));
+  for (const rawBase of textBasesRaw) {
+    const baseId = str(rawBase.id ?? rawBase.textBaseId ?? rawBase.text_base_id);
+    if (!baseId) continue;
+    for (const questionId of linkedQuestionIdsFromTextBase(rawBase)) {
+      const linkedQuestion = questionsById.get(questionId);
+      if (!linkedQuestion) continue;
+      if (!linkedQuestion.textBaseId) linkedQuestion.textBaseId = baseId;
+      else if (linkedQuestion.textBaseId !== baseId) linkedQuestion._textBaseLinkConflict = true;
+    }
+  }
   const existingTextBases = await getAll(db, 'textBases');
   const existingTextBaseMap = new Map(existingTextBases.map(item => [item.id, item]));
   for (const item of textBases) {
@@ -345,7 +386,8 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     return normalizeSearch([institution, exam, year, packageId].join('|'));
   };
   const sharedTextSignature = (item, fallbackSource = null) => {
-    const content = normalizeSearch(item.content).replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+    const plain = item.content || blockPlainText(item.blocks || []);
+    const content = normalizeSearch(plain).replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
     const itemSource = item.source && typeof item.source === 'object' && Object.keys(item.source).length ? item.source : fallbackSource;
     const sourceKey = sourceIdentity(itemSource) || (fallbackSource ? `package:${normalizeSearch(pkg.packageId || pkg.id || 'incoming')}` : '');
     return content && sourceKey ? `${sourceKey}::${content}` : '';
@@ -379,7 +421,6 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
   }
   for (const question of questions) if (textBaseAliases.has(question.textBaseId)) question.textBaseId = textBaseAliases.get(question.textBaseId);
   textBases = canonicalTextBases;
-  const textBaseIds = new Set([...textBases.map(item => item.id), ...existingTextBaseMap.keys()]);
   for (const item of textBases) {
     const existing = existingTextBaseMap.get(item.id);
     if (existing && (normalizeSearch(existing.content) !== normalizeSearch(item.content) || JSON.stringify(existing.blocks || []) !== JSON.stringify(item.blocks || []) || normalizeSearch(existing.title) !== normalizeSearch(item.title))) {
@@ -387,6 +428,13 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     }
   }
   const textBasesToWrite = textBases.filter(item => !existingTextBaseMap.has(item.id));
+  const effectiveTextBaseMap = new Map(existingTextBaseMap);
+  for (const item of textBases) effectiveTextBaseMap.set(item.id, item);
+  const referencedTextBaseIds = new Set(questions.map(question => question.textBaseId).filter(Boolean));
+  const resolvedTextBases = [...referencedTextBaseIds].map(id => effectiveTextBaseMap.get(id)).filter(Boolean);
+  const textBaseIds = new Set(resolvedTextBases
+    .filter(item => Boolean(String(item.content || '').trim() || (Array.isArray(item.blocks) && item.blocks.length)))
+    .map(item => item.id));
 
   let zipFiles = new Map();
   if (zipFile) zipFiles = await readZip(zipFile);
@@ -485,7 +533,13 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     packageId: str(pkg.packageId ?? pkg.package_id) || crypto.randomUUID(),
     packageName: str(pkg.packageName ?? pkg.name ?? pkg.nome) || jsonFile.name,
     schemaVersion: String(pkg.schemaVersion),
-    questions, textBases: textBasesToWrite, assets, assetBlobs, incomplete, duplicates, sourceExam,
+    questions,
+    // textBases contains every referenced, resolved base (including records already
+    // present in IndexedDB) for preview/rendering. Only textBasesToWrite is persisted.
+    textBases: resolvedTextBases,
+    textBasesToWrite,
+    assets, assetBlobs, incomplete, duplicates, sourceExam,
+    sharedTextBaseCount: questions.filter(question => question.textBaseId && textBaseIds.has(question.textBaseId)).length,
     filesFound: zipFiles.size,
     invalidAssetIds: [...invalidAssetIds],
     fileName: jsonFile.name,
