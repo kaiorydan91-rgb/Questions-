@@ -208,7 +208,7 @@ function validateQuestion(question, index, textBaseIds, assetMap, invalidAssetId
   else if (!SUBJECT_AREA[question.subject]) issues.push(`Matéria não reconhecida: ${question.subject}.`);
   else if (question.area && SUBJECT_AREA[question.subject] !== question.area) issues.push(`A matéria ${question.subject} pertence à área ${SUBJECT_AREA[question.subject]}, não a ${question.area}.`);
   if (!question.primaryTopic) issues.push('Assunto principal não informado.');
-  if (!question.statement && !(question.contentBlocks || []).length) issues.push('Enunciado vazio: informe statement ou content com blocos.');
+  if (!question.statement && !(question.contentBlocks || []).length && !(question.textBaseId && textBaseIds.has(question.textBaseId))) issues.push('Enunciado vazio: informe statement, content com blocos ou um textBaseId válido.');
   const validateBlocks = (blocks, location) => {
     for (const block of blocks || []) {
       if (!BLOCK_TYPES.has(block.type)) issues.push(`Tipo de bloco não reconhecido em ${location}: ${block.type} (${block.id}). O conteúdo original foi preservado, mas precisa de revisão.`);
