@@ -314,6 +314,108 @@ function renderBank() {
   $('#bankPagination').innerHTML = pageCount > 1 ? `<span class="fine-print">Página ${state.bankPage} de ${pageCount}</span><div class="pagination-actions"><button class="button secondary" data-bank-page="${Math.max(1,state.bankPage-1)}" ${state.bankPage===1?'disabled':''}>Anterior</button><button class="button secondary" data-bank-page="${Math.min(pageCount,state.bankPage+1)}" ${state.bankPage===pageCount?'disabled':''}>Próxima</button></div>` : '';
 }
 
+function textBaseGroups(allQuestions = state.data.questions || []) {
+  const groups = new Map();
+  for (const question of allQuestions) {
+    if (!question?.textBaseId) continue;
+    if (!groups.has(question.textBaseId)) groups.set(question.textBaseId, []);
+    groups.get(question.textBaseId).push(question);
+  }
+  return groups;
+}
+function sourceQuestionNumberValue(question) {
+  const value = question?.sourceQuestionNumber;
+  if (value == null || value === '') return null;
+  const match = String(value).match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+function sortQuestionsInsideTextBase(questions) {
+  return [...questions].sort((a, b) => {
+    const aNumber = sourceQuestionNumberValue(a), bNumber = sourceQuestionNumberValue(b);
+    if (aNumber != null && bNumber != null && aNumber !== bNumber) return aNumber - bNumber;
+    if (aNumber != null && bNumber == null) return -1;
+    if (aNumber == null && bNumber != null) return 1;
+    return 0;
+  });
+}
+function textBaseDisplayContent(textBase, relatedQuestions = []) {
+  const content = String(textBase?.content ?? '');
+  const ordered = sortQuestionsInsideTextBase(relatedQuestions);
+  const questionNumbers = ordered.map(sourceQuestionNumberValue);
+  if (questionNumbers.length < 2 || questionNumbers.some(number => number == null)) return content;
+  const lines = content.split(/\r?\n/);
+  let end = lines.length;
+  while (end > 0 && !lines[end - 1].trim()) end--;
+  const start = end - questionNumbers.length;
+  if (start < 0) return content;
+  const markers = lines.slice(start, end).map(line => {
+    const match = line.match(/^\s*(?:quest(?:ão|ao)\s*)?(\d+)\s*[.)\-:]?\s*$/i);
+    return match ? Number(match[1]) : null;
+  });
+  // Remove only a trailing standalone number sequence that exactly duplicates the
+  // original question numbers of this shared-text group. Never edit the stored text.
+  if (markers.length !== questionNumbers.length || markers.some((number, index) => number !== questionNumbers[index])) return content;
+  return lines.slice(0, start).join('\n').replace(/[\t \r\n]+$/, '');
+}
+function buildQuestionUnits(questions) {
+  const units = [], byKey = new Map();
+  for (const question of questions) {
+    const key = question.textBaseId ? `text:${question.textBaseId}` : `question:${question.id}`;
+    let unit = byKey.get(key);
+    if (!unit) {
+      unit = { key, textBaseId: question.textBaseId || null, questions: [], shared: false, weight: 1 };
+      byKey.set(key, unit); units.push(unit);
+    }
+    unit.questions.push(question);
+  }
+  for (const unit of units) {
+    if (unit.textBaseId) unit.questions = sortQuestionsInsideTextBase(unit.questions);
+    unit.shared = Boolean(unit.textBaseId && unit.questions.length > 1);
+    unit.weight = unit.shared ? 0.4 : 1;
+  }
+  return units;
+}
+function flattenQuestionUnits(units) { return units.flatMap(unit => unit.questions); }
+function orderQuestionIdsWithTextBaseGroups(ids, universe = state.data.questions || []) {
+  const universeById = new Map(universe.map(question => [question.id, question]));
+  const requested = [...new Set((ids || []).map(String))].filter(id => universeById.has(id));
+  if (!requested.length) return [];
+  const selected = new Set(requested);
+  const universeGroups = textBaseGroups(universe);
+  for (const id of requested) {
+    const question = universeById.get(id);
+    if (!question?.textBaseId) continue;
+    (universeGroups.get(question.textBaseId) || []).forEach(member => selected.add(member.id));
+  }
+  const selectedQuestions = requested.map(id => universeById.get(id)).filter(Boolean);
+  // Add siblings before grouping; a text-base group is kept whole and internally ordered.
+  for (const id of [...selected]) if (!requested.includes(id)) selectedQuestions.push(universeById.get(id));
+  return flattenQuestionUnits(buildQuestionUnits(selectedQuestions)).map(question => question.id);
+}
+function keepOnlyCompleteTextBaseGroups(candidates, scopeIds = (state.data.questions || []).map(q => q.id)) {
+  const candidateIds = new Set(candidates.map(question => question.id));
+  const scope = new Set(scopeIds.map(String));
+  const groups = textBaseGroups();
+  const blocked = new Set();
+  for (const [textBaseId, members] of groups) {
+    if (members.length < 2) continue;
+    const memberIds = members.map(question => question.id);
+    if (memberIds.some(id => !scope.has(id)) || memberIds.some(id => !candidateIds.has(id))) memberIds.forEach(id => blocked.add(id));
+  }
+  return candidates.filter(question => !blocked.has(question.id));
+}
+function weightedRandomUnits(units) {
+  return units.map(unit => ({ unit, key: Math.pow(Math.random(), 1 / Math.max(.05, unit.weight || 1)) }))
+    .sort((a, b) => b.key - a.key).map(item => item.unit);
+}
+function takeUnitsForQuestionCount(units, amount) {
+  const selected = []; let count = 0;
+  for (const unit of units) {
+    if (count >= amount) break;
+    selected.push(unit); count += unit.questions.length;
+  }
+  return selected;
+}
 function eligibleQuestions() {
   const { areas, subjects, topics } = state.activityFilters;
   const difficulty = $('#activityDifficulty').value;
@@ -323,12 +425,13 @@ function eligibleQuestions() {
   const completedActivityIds = new Set(state.data.activities.filter(item => item.status === 'completed').map(item => item.id));
   const answeredIds = new Set(state.data.answers.filter(a => completedActivityIds.has(a.activityId) && a.response !== '' && a.response != null && a.isCorrect != null).map(a => a.questionId));
   const dueIds = new Set(state.data.reviews.filter(r => r.status !== 'completed' && Date.parse(r.dueAt) <= Date.now()).map(r => r.questionId));
-  return state.data.questions.filter(q => {
+  const filtered = state.data.questions.filter(q => {
     const contentMatch = !hasContentFilters || areas.includes(q.area) || subjects.includes(q.subject);
     const questionTopics = topicValues(q).map(normalizeSearch);
     const topicMatch = !normalizedTopics.length || normalizedTopics.some(topic => questionTopics.some(value => value.includes(topic)));
     return contentMatch && topicMatch && (!difficulty || q.difficulty === difficulty) && (includeSolved || !answeredIds.has(q.id));
   }).map(q => ({ ...q, isDue: dueIds.has(q.id) }));
+  return keepOnlyCompleteTextBaseGroups(filtered, state.data.questions.map(q => q.id));
 }
 function buildActivityTopicCatalog() {
   const questions = state.data.questions || [];
@@ -560,21 +663,39 @@ async function makeActivity() {
   if (amount > candidates.length) toast(`A quantidade foi ajustada para ${candidates.length} questões.`);
   let selected = [];
   const strategy = $('#activityStrategy').value;
+  const units = buildQuestionUnits(candidates);
+  let selectedUnits = [];
   if (strategy === 'balanced') {
     const buckets = new Map();
-    randomize(candidates).forEach(q => { const key = q.subject || q.area; if (!buckets.has(key)) buckets.set(key, []); buckets.get(key).push(q); });
-    while (selected.length < amount && [...buckets.values()].some(bucket => bucket.length)) {
-      for (const bucket of buckets.values()) if (bucket.length && selected.length < amount) selected.push(bucket.shift());
+    weightedRandomUnits(units).forEach(unit => {
+      const key = unit.questions[0]?.subject || unit.questions[0]?.area || 'Outros';
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(unit);
+    });
+    while (selectedUnits.reduce((sum, unit) => sum + unit.questions.length, 0) < amount && [...buckets.values()].some(bucket => bucket.length)) {
+      for (const bucket of buckets.values()) if (bucket.length && selectedUnits.reduce((sum, unit) => sum + unit.questions.length, 0) < amount) selectedUnits.push(bucket.shift());
     }
   } else if (strategy === 'weakness') {
     const scores = await computeQuestionAccuracy();
-    selected = candidates.sort((a,b) => (scores.get(a.id)?.accuracy ?? 1) - (scores.get(b.id)?.accuracy ?? 1)).slice(0, amount);
-    if (selected.every(q => !scores.has(q.id))) selected = randomize(candidates).slice(0, amount);
+    const ranked = [...units].sort((a, b) => {
+      const avg = unit => unit.questions.reduce((sum, q) => sum + (scores.get(q.id)?.accuracy ?? 1), 0) / unit.questions.length;
+      const difference = avg(a) - avg(b);
+      return difference || (b.weight - a.weight);
+    });
+    selectedUnits = ranked.every(unit => unit.questions.every(q => !scores.has(q.id)))
+      ? takeUnitsForQuestionCount(weightedRandomUnits(units), amount)
+      : takeUnitsForQuestionCount(ranked, amount);
   } else if (strategy === 'review') {
-    selected = candidates.filter(q => q.isDue).sort((a,b) => a.id.localeCompare(b.id)).slice(0, amount);
-    if (selected.length < amount) selected = [...selected, ...randomize(candidates.filter(q => !selected.some(s => s.id === q.id))).slice(0, amount - selected.length)];
-  } else selected = randomize(candidates).slice(0, amount);
+    const dueUnits = units.filter(unit => unit.questions.some(q => q.isDue)).sort((a,b) => Number(a.shared) - Number(b.shared));
+    selectedUnits = takeUnitsForQuestionCount(dueUnits, amount);
+    if (selectedUnits.reduce((sum, unit) => sum + unit.questions.length, 0) < amount) {
+      const selectedKeys = new Set(selectedUnits.map(unit => unit.key));
+      selectedUnits = [...selectedUnits, ...takeUnitsForQuestionCount(weightedRandomUnits(units.filter(unit => !selectedKeys.has(unit.key))), amount - selectedUnits.reduce((sum, unit) => sum + unit.questions.length, 0))];
+    }
+  } else selectedUnits = takeUnitsForQuestionCount(weightedRandomUnits(units), amount);
+  selected = flattenQuestionUnits(selectedUnits);
   if (!selected.length) return toast('Não foi possível montar a atividade.');
+  if (selected.length > amount) toast(`A atividade foi ajustada para ${selected.length} questões para preservar os textos compartilhados.`);
   const activity = {
     id: makeId('activity'), title: `Atividade · ${new Date().toLocaleDateString('pt-BR')}`,
     questionIds: selected.map(q => q.id), status: 'running', createdAt: nowISO(), startedAt: nowISO(), activeSince: nowISO(), elapsedSecs: 0,
@@ -857,24 +978,47 @@ function bindActivityNavigationSync() {
   scheduleActivityNavigationSync();
 }
 
+function renderActivityQuestionCard(q, index, options = {}) {
+  const answer = state.activityAnswers.get(q.id);
+  const textBase = options.textBase || null;
+  const showBase = Boolean(options.showBase && textBase);
+  const baseId = textBase?.id || '';
+  const baseHtml = showBase ? `<div class="base-text" id="exam-base-${safeAttr(baseId)}"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-textbase-for="${safeAttr(q.id)}">${richText(textBaseDisplayContent(textBase, options.baseQuestions || [q]))}</div></div>` : '';
+  const returnToBase = textBase && !showBase ? `<button type="button" class="base-return" data-jump-textbase="${safeAttr(baseId)}">↩ Voltar ao texto-base</button>` : '';
+  const questionHead = `<div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${hasExplanationContent(q) ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>`;
+  const leadHtml = showBase ? `${baseHtml}${questionHead}` : `${questionHead}${returnToBase}`;
+  return `<article class="glass-card exam-question ${showBase ? 'exam-question-base' : ''}" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}">${leadHtml}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem" data-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, state.currentActivity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, state.currentActivity.config)}</div></article>`;
+}
+
 async function renderSession() {
   if (!state.currentActivity) return;
-  const activity = state.currentActivity;
-  const questions = activity.questionIds.map(questionById).filter(Boolean);
+  let activity = state.currentActivity;
   await loadActivityAnswers(activity.id);
-  const answered = questions.filter(q => answerCount(q.id)).length;
-  const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${questions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${questions.length ? answered / questions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${questions.map((q,index) => {
-    const answer = state.activityAnswers.get(q.id);
-    const textBase = textBaseById(q.textBaseId);
-    return `<article class="glass-card exam-question" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}"><div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${hasExplanationContent(q) ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}${renderQuestionImages(q,['after_text_base','after-text-base'])}${renderQuestionTables(q,['after_text_base','after-text-base'])}${renderQuestionEquations(q,['after_text_base','after-text-base'])}${renderQuestionImages(q,['before_statement','before-statement'])}<div class="exam-stem" data-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</div>${renderQuestionImages(q,['statement','enunciado','after_statement','after-statement'])}${renderQuestionTables(q,['statement','after_statement'])}${renderQuestionEquations(q,['statement','after_statement'])}${renderQuestionReferences(q)}${renderResponseOptions(q, answer?.response || '', answer, activity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, activity.config)}</div></article>`;
-  }).join('')}</div><aside class="glass-card exam-side"><h3>Navegação</h3><div class="exam-number-grid" id="examNumberGrid">${questions.map((q,index) => { const answer = state.activityAnswers.get(q.id); const navAnswer = navigationResponseLabel(q, answer?.response); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${answer?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index + 1}${navAnswer ? `, resposta marcada ${safeAttr(navAnswer)}` : ''}"><span class="exam-number-index">${index + 1}</span>${navAnswer ? `<span class="exam-number-answer">${escapeHTML(navAnswer)}</span>` : ''}</button>`; }).join('')}</div><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${questions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
+  const normalizedIds = orderQuestionIdsWithTextBaseGroups(activity.questionIds, state.data.questions);
+  if (JSON.stringify(normalizedIds) !== JSON.stringify(activity.questionIds || [])) {
+    activity = { ...activity, questionIds: normalizedIds, updatedAt: nowISO() };
+    await putRecord(state.db, 'activities', activity);
+    state.currentActivity = activity;
+    state.data.activities = state.data.activities.map(item => item.id === activity.id ? activity : item);
+  }
+  const questions = activity.questionIds.map(questionById).filter(Boolean);
+  const units = buildQuestionUnits(questions);
+  const displayQuestions = flattenQuestionUnits(units);
+  const questionIndex = new Map(displayQuestions.map((q,index)=>[q.id,index]));
+  const answered = displayQuestions.filter(q => answerCount(q.id)).length;
+  const cardsHtml = units.map(unit => unit.questions.map((q,localIndex) => {
+    const index = questionIndex.get(q.id) ?? 0;
+    const base = unit.textBaseId ? textBaseById(unit.textBaseId) : null;
+    return renderActivityQuestionCard(q, index, { textBase: base, baseQuestions: unit.questions, showBase: Boolean(base && localIndex === 0) });
+  }).join('')).join('');
+  const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${displayQuestions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${displayQuestions.length ? answered / displayQuestions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${cardsHtml}</div><aside class="exam-side"><section class="glass-card exam-nav-panel"><h3>Navegação</h3><div class="exam-number-grid" id="examNumberGrid">${displayQuestions.map((q,index) => { const answer = state.activityAnswers.get(q.id); const navAnswer = navigationResponseLabel(q, answer?.response); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${answer?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index + 1}${navAnswer ? `, resposta marcada ${safeAttr(navAnswer)}` : ''}"><span class="exam-number-index">${index + 1}</span>${navAnswer ? `<span class="exam-number-answer">${escapeHTML(navAnswer)}</span>` : ''}</button>`; }).join('')}</div></section><section class="glass-card exam-actions-panel"><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></section></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${displayQuestions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('#activitySession').innerHTML = html;
   $('.activity-layout').classList.add('hidden');
   $('#activityNoQuestions').classList.add('hidden');
   $('#activitySession').classList.remove('hidden');
   await hydrateAssetImages($('#activitySession'));
-  for (const question of questions) {
+  for (const question of displayQuestions) {
     const marks = state.activityAnswers.get(question.id)?.highlights || [];
     applyTextMarks($(`[data-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement');
     applyTextMarks($(`[data-textbase-for="${CSS.escape(question.id)}"]`), marks, 'textBase');
@@ -1033,6 +1177,7 @@ async function renderResult(activity) {
     return [...map.entries()].sort((a,b)=>b[1].total-a[1].total || a[0].localeCompare(b[0],'pt-BR')).map(([name,item]) => `<div class="result-breakdown-row"><span><b>${escapeHTML(name)}</b><small>${item.correct}/${item.answered} acertos · ${item.blank} em branco · ${item.total} questões</small></span><strong>${item.answered ? `${Math.round(item.correct/item.answered*100)}%` : '—'}</strong></div>`).join('');
   };
   const resultBreakdown = `<section class="glass-card result-breakdown"><div class="eyebrow">DIAGNÓSTICO DA ATIVIDADE</div><div class="result-breakdown-grid"><div><h3>Por matéria</h3>${renderResultBreakdown(question=>question.subject||question.area)}</div><div><h3>Por dificuldade</h3>${renderResultBreakdown(question=>question.difficulty||'Sem nível')}</div></div></section>`;
+  const renderedResultTextBases = new Set();
   $('#activitySession').innerHTML = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">RESULTADO DA ATIVIDADE</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">Concluída em ${formatDate(activity.endedAt, true)} · ${durationLabel(result.durationSecs)}</div></div><button class="button secondary" data-action="new-activity">Nova atividade</button></div><article class="glass-card result-hero"><div class="eyebrow">APROVEITAMENTO</div><div class="result-score"><strong>${result.percentage ?? 0}%</strong><span>${result.correct ?? 0} acertos de ${result.total ?? 0} questões</span></div><div class="metric-row"><div class="metric"><strong>${result.wrong ?? 0}</strong><span>erros</span></div><div class="metric"><strong>${result.blank ?? 0}</strong><span>em branco</span></div><div class="metric"><strong>${Number(result.netScore ?? 0).toFixed(2).replace('.', ',')}</strong><span>pontuação líquida</span></div><div class="metric"><strong>${durationLabel(result.durationSecs)}</strong><span>tempo</span></div></div><div class="result-tri-row"><div><b>${result.triEstimate ? `θ ${result.triEstimate.theta.toFixed(2).replace('.',',')}` : 'θ indisponível'}</b></div><div><b>${result.difficultyConsistency ? `${result.difficultyConsistency.percentage}%` : '—'}</b></div></div></article>${resultBreakdown}<div class="eyebrow">REVISÃO DAS RESPOSTAS</div><div style="height:10px"></div><div>${questions.map((q,index) => {
     const answer = state.activityAnswers.get(q.id) || {};
     const correctAnswer = getExpectedAnswer(q);
@@ -1045,7 +1190,9 @@ async function renderResult(activity) {
     const selectedAlternativeImages = q.type === 'multiple_choice' ? renderAlternativeExplanationImages(q, selectedKey) : '';
     const generalExplanationImages = renderExplanationImages(q);
     const textBase = textBaseById(q.textBaseId);
-    return `<article class="result-question"><h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBase.content)}</div></div>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation || selectedAlternativeImages ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b>${selectedAlternativeExplanation ? `<p>${richText(selectedAlternativeExplanation)}</p>` : ''}${selectedAlternativeImages}</div>` : ''}${q.explanation || generalExplanationImages ? `<div class="full-explanation"><b>Resolução completa</b>${q.explanation ? `<p>${richText(q.explanation)}</p>` : ''}${generalExplanationImages}</div>` : ''}${complete && !responseIsCorrect(q,answer.response) ? `<label class="error-reason-inline"><span>O que melhor explica esse erro?</span><select data-error-reason data-answer-id="${safeAttr(answer.id)}"><option value="">Selecione o motivo</option><option value="content" ${answer.errorReason==='content'?'selected':''}>Falta de conteúdo</option><option value="interpretation" ${answer.errorReason==='interpretation'?'selected':''}>Interpretação do enunciado</option><option value="calculation" ${answer.errorReason==='calculation'?'selected':''}>Erro de cálculo</option><option value="confusion" ${answer.errorReason==='confusion'?'selected':''}>Confusão conceitual</option><option value="time" ${answer.errorReason==='time'?'selected':''}>Gestão do tempo</option><option value="insecurity" ${answer.errorReason==='insecurity'?'selected':''}>Insegurança na escolha</option><option value="other" ${answer.errorReason==='other'?'selected':''}>Outro motivo</option></select></label>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
+    const showTextBase = Boolean(textBase && !renderedResultTextBases.has(q.textBaseId));
+    if (showTextBase) renderedResultTextBases.add(q.textBaseId);
+    return `<article class="result-question">${showTextBase ? `<div class="base-text" id="result-base-${safeAttr(q.textBaseId)}"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><div class="base-content" data-result-textbase-for="${safeAttr(q.id)}">${richText(textBaseDisplayContent(textBase, questions.filter(item => item.textBaseId === q.textBaseId)))}</div></div>` : ''}<h3><span>Questão ${index+1} · ${escapeHTML(q.subject || '')}</span><span class="tag ${status === 'Correta' ? 'peach' : ''}">${status}</span></h3>${!showTextBase && textBase ? `<a class="base-return" href="#result-base-${safeAttr(q.textBaseId)}">↩ Ver texto-base</a>` : ''}<p class="result-statement" data-result-statement-for="${safeAttr(q.id)}">${questionStatementHTML(q.statement)}</p>${renderQuestionReferences(q)}<p>Sua resposta: <b>${userValue}</b> · Gabarito: <b>${escapeHTML(rightLabel)}</b></p>${selectedAlternativeExplanation || selectedAlternativeImages ? `<div class="alternative-comment ${complete && responseIsCorrect(q, answer.response) ? 'correct' : 'wrong'}"><b>Comentário da alternativa selecionada (${escapeHTML(selectedKey)})</b>${selectedAlternativeExplanation ? `<p>${richText(selectedAlternativeExplanation)}</p>` : ''}${selectedAlternativeImages}</div>` : ''}${q.explanation || generalExplanationImages ? `<div class="full-explanation"><b>Resolução completa</b>${q.explanation ? `<p>${richText(q.explanation)}</p>` : ''}${generalExplanationImages}</div>` : ''}${complete && !responseIsCorrect(q,answer.response) ? `<label class="error-reason-inline"><span>O que melhor explica esse erro?</span><select data-error-reason data-answer-id="${safeAttr(answer.id)}"><option value="">Selecione o motivo</option><option value="content" ${answer.errorReason==='content'?'selected':''}>Falta de conteúdo</option><option value="interpretation" ${answer.errorReason==='interpretation'?'selected':''}>Interpretação do enunciado</option><option value="calculation" ${answer.errorReason==='calculation'?'selected':''}>Erro de cálculo</option><option value="confusion" ${answer.errorReason==='confusion'?'selected':''}>Confusão conceitual</option><option value="time" ${answer.errorReason==='time'?'selected':''}>Gestão do tempo</option><option value="insecurity" ${answer.errorReason==='insecurity'?'selected':''}>Insegurança na escolha</option><option value="other" ${answer.errorReason==='other'?'selected':''}>Outro motivo</option></select></label>` : ''}<button class="text-button" data-open-question="${safeAttr(q.id)}">Abrir questão completa ↗</button></article>`;
   }).join('')}</div><div class="exam-bottom"><button class="button secondary" data-page="performance">Ver desempenho</button><button class="button primary" data-action="new-activity">Voltar ao gerador</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('.activity-layout').classList.add('hidden'); $('#pendingTaskSection')?.classList.add('hidden'); $('#savedActivitiesSection')?.classList.add('hidden'); $('#activityNoQuestions').classList.add('hidden'); $('#activitySession').classList.remove('hidden');
@@ -1603,7 +1750,8 @@ function openTaskBuilderForIds(packageName,allIds,source) {
 function taskBuilderCandidates() {
   const draft=state.importTaskDraft; if(!draft) return [];
   const area=$('#packageTaskArea')?.value||'',subject=$('#packageTaskSubject')?.value||'',topic=$('#packageTaskTopic')?.value||'',difficulty=$('#packageTaskDifficulty')?.value||'';
-  return draft.ids.map(id=>questionById(id)).filter(Boolean).filter(q=>(!area||q.area===area)&&(!subject||q.subject===subject)&&(!topic||topicValues(q).some(value=>normalizeSearch(value)===normalizeSearch(topic)))&&(!difficulty||q.difficulty===difficulty));
+  const filtered = draft.ids.map(id=>questionById(id)).filter(Boolean).filter(q=>(!area||q.area===area)&&(!subject||q.subject===subject)&&(!topic||topicValues(q).some(value=>normalizeSearch(value)===normalizeSearch(topic)))&&(!difficulty||q.difficulty===difficulty));
+  return keepOnlyCompleteTextBaseGroups(filtered, draft.ids);
 }
 function renderImportTaskBuilder() {
   const draft=state.importTaskDraft; if(!draft||!$('#packageTaskMode')) return;
@@ -1614,22 +1762,24 @@ function renderImportTaskBuilder() {
   const max=candidates.length;
   const quantity=$('#packageTaskQuantity'); if(quantity){quantity.max=String(max);quantity.value=String(Math.min(Math.max(1,Number(quantity.value)||1),Math.max(1,max)));}
   const selected=[...draft.selectedIds].filter(id=>draft.ids.includes(id));
-  $('#packageTaskSelectionCount').textContent=`${selected.length} selecionadas`;
-  const pageSize=50; const pageCount=Math.max(1,Math.ceil(candidates.length/pageSize)); draft.manualPage=Math.min(draft.manualPage,pageCount-1);
-  const visible=candidates.slice(draft.manualPage*pageSize,(draft.manualPage+1)*pageSize);
-  $('#packageTaskQuestionList').innerHTML=visible.map(q=>`<label class="task-question-choice"><input type="checkbox" data-package-task-question="${safeAttr(q.id)}" ${draft.selectedIds.has(q.id)?'checked':''}/><span><b>${escapeHTML(q.id)} · ${escapeHTML(q.subject||q.area)}</b><small>${escapeHTML(q.primaryTopic||'Sem assunto')} · ${escapeHTML(q.difficulty||'Sem nível')}</small><small>${escapeHTML(String(q.statement||'').slice(0,120))}${String(q.statement||'').length>120?'…':''}</small></span></label>`).join('')||'<div class="empty-inline">Nenhuma questão corresponde aos filtros.</div>';
+  $('#packageTaskSelectionCount').textContent=`${selected.length} questões selecionadas`;
+  const units=buildQuestionUnits(candidates);
+  const pageSize=30; const pageCount=Math.max(1,Math.ceil(units.length/pageSize)); draft.manualPage=Math.min(draft.manualPage,pageCount-1);
+  const visible=units.slice(draft.manualPage*pageSize,(draft.manualPage+1)*pageSize); draft.visibleUnits=visible;
+  $('#packageTaskQuestionList').innerHTML=visible.map((unit,index)=>{const ids=unit.questions.map(q=>q.id);const checked=ids.every(id=>draft.selectedIds.has(id));const first=unit.questions[0];const numbers=unit.questions.map(q=>q.sourceQuestionNumber||q.id).join(' · ');const base=textBaseById(unit.textBaseId);return `<label class="task-question-choice ${unit.shared?'task-question-choice-group':''}"><input type="checkbox" data-package-task-unit="${index}" ${checked?'checked':''}/><span><b>${unit.shared?`Bloco de texto · ${unit.questions.length} questões`:`${escapeHTML(first.id)} · ${escapeHTML(first.subject||first.area)}`}</b>${unit.shared?`<small>${escapeHTML(base?.title||'Texto-base compartilhado')} · questões ${escapeHTML(numbers)}</small>`:''}<small>${escapeHTML(first.subject||first.area)} · ${escapeHTML(first.primaryTopic||'Sem assunto')} · ${escapeHTML(first.difficulty||'Sem nível')}</small><small>${escapeHTML(String(first.statement||'').slice(0,120))}${String(first.statement||'').length>120?'…':''}</small></span></label>`;}).join('')||'<div class="empty-inline">Nenhuma questão corresponde aos filtros ou os filtros dividem um texto compartilhado.</div>';
   $('#packageTaskPagination').innerHTML=pageCount>1?`<button class="button small secondary" data-task-manual-page="${Math.max(0,draft.manualPage-1)}" ${draft.manualPage===0?'disabled':''}>Anterior</button><span>Página ${draft.manualPage+1} de ${pageCount}</span><button class="button small secondary" data-task-manual-page="${Math.min(pageCount-1,draft.manualPage+1)}" ${draft.manualPage===pageCount-1?'disabled':''}>Próxima</button>`:'';
   const count=mode==='manual'?selected.length:mode==='random'?Math.min(Number(quantity?.value)||1,max):max;
-  $('#packageTaskSummary').textContent=mode==='manual'?`${count} questões selecionadas de ${max} disponíveis.`:mode==='random'?`${count} questões serão sorteadas entre ${max} disponíveis.`:`${count} questões serão incluídas nesta tarefa.`;
+  $('#packageTaskSummary').textContent=mode==='manual'?`${count} questões selecionadas de ${max} disponíveis. Blocos compartilhados são selecionados por inteiro.`:mode==='random'?`Meta de ${count} questões entre ${max} disponíveis. Textos compartilhados têm menor peso no sorteio e nunca são separados.`:`${count} questões serão incluídas nesta tarefa; blocos compartilhados permanecem completos.`;
   $('#modalFooter button[data-action="save-import-task"],#modalFooter button[data-action="resolve-import-task"]').forEach(button=>button.disabled=count===0);
 }
 function resolveImportTaskIds() {
   const draft=state.importTaskDraft; if(!draft) return [];
   const candidates=taskBuilderCandidates(); const mode=$('#packageTaskMode').value;
-  let ids=mode==='manual'?[...draft.selectedIds].filter(id=>draft.ids.includes(id)):candidates.map(q=>q.id);
-  if(mode==='random') ids=randomize(ids).slice(0,Math.min(Number($('#packageTaskQuantity').value)||1,ids.length));
-  if($('#packageTaskShuffle').checked) ids=randomize(ids);
-  return [...new Set(ids)];
+  let units=buildQuestionUnits(candidates);
+  if(mode==='manual') units=units.filter(unit=>unit.questions.every(q=>draft.selectedIds.has(q.id)));
+  if(mode==='random') units=takeUnitsForQuestionCount(weightedRandomUnits(units), Math.min(Number($('#packageTaskQuantity').value)||1,candidates.length));
+  if($('#packageTaskShuffle').checked) units=randomize(units);
+  return orderQuestionIdsWithTextBaseGroups(flattenQuestionUnits(units).map(q=>q.id), draft.ids);
 }
 async function saveImportTask(resolveNow=false) {
   const ids=resolveImportTaskIds(); if(!ids.length) return toast('Selecione ao menos uma questão para a tarefa.');
@@ -1648,7 +1798,7 @@ function renderPendingTasks() {
   $('#pendingTaskList').innerHTML=pending.map(task=>`<article class="pending-task-item"><div><b>${escapeHTML(task.title)}</b><small>${task.questionIds.length} questões · Criada em ${formatDate(task.createdAt,true)}</small><small>${escapeHTML(task.source?.type==='package'?'Origem: pacote importado':task.source?.type==='packages'?'Origem: seleção de pacotes':'Origem: recomendações de estudo')}</small></div><div class="inline-actions"><button class="button small primary" data-action="start-pending-task" data-id="${safeAttr(task.id)}">Resolver</button><button class="button small secondary" data-action="delete-pending-task" data-id="${safeAttr(task.id)}">Excluir</button></div></article>`).join('');
 }
 async function createPendingTaskFromIds(ids,title,source={type:'manual'}) {
-  const validIds=[...new Set(ids.filter(id=>questionById(id)))]; if(!validIds.length) return toast('Nenhuma questão disponível para criar a tarefa.');
+  const validIds=orderQuestionIdsWithTextBaseGroups(ids, state.data.questions); if(!validIds.length) return toast('Nenhuma questão disponível para criar a tarefa.');
   const task={id:makeId('activity'),title,questionIds:validIds,status:'pending',createdAt:nowISO(),source,config:{correctionMode:'end',showErrors:false,commentMode:'available',navigationMode:'free',timerEnabled:false,timerMinutes:90,negativeScoring:false,strategy:'saved-task'}};
   await putRecord(state.db,'activities',task); await refreshData(); pageNavigate('activity'); toast(`Tarefa adicionada com ${validIds.length} questões.`);
 }
@@ -1686,6 +1836,7 @@ function formatBytes(bytes) {
 async function openQuestionDetail(id) {
   const question = questionById(id); if (!question) return toast('Questão não encontrada.');
   const textBase = textBaseById(question.textBaseId);
+  const textBaseQuestions = question.textBaseId ? state.data.questions.filter(item => item.textBaseId === question.textBaseId) : [question];
   let expected = getExpectedAnswer(question);
   const answerLabel = question.type === 'multiple_choice' ? `${expected}) ${question.alternatives?.[expected] || ''}` : expected;
   const alternatives = question.type === 'multiple_choice' ? Object.entries(question.alternatives || {}).map(([key,value]) => `<div class="answer-option"><div class="option-content"><b>${escapeHTML(key)})</b> ${richText(value)}${renderOptionImages(question,key)}</div></div>`).join('') : question.type === 'assertion_set' ? question.statements.map((item,index) => `<p><b>${index+1}.</b> ${richText(item.text)}</p>`).join('') : question.type === 'true_false' ? '<div class="answer-options"><div class="answer-option"><span><b>V</b> — Verdadeiro</span></div><div class="answer-option"><span><b>F</b> — Falso</span></div></div>' : '';
@@ -1706,7 +1857,7 @@ async function openQuestionDetail(id) {
   const generalExplanationHtml = question.explanation || renderExplanationImages(question)
     ? `<div class="answer-feedback correct"><b>Resolução completa</b>${question.explanation ? `<p>${richText(question.explanation)}</p>` : ''}${renderExplanationImages(question)}</div>`
     : `<div class="answer-feedback correct"><b>Gabarito: ${escapeHTML(answerLabel)}</b></div>`;
-  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBase.content)}</div>` : ''}${beforeStemHtml}<div class="exam-stem">${richText(question.statement)}</div>${afterStemHtml}${renderQuestionReferences(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}${generalExplanationHtml}${alternativeCommentsHtml ? `<h3>Comentários das alternativas</h3>${alternativeCommentsHtml}` : ''}${versionHistoryHtml}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
+  openModal(question.id, `<div class="question-meta"><span class="tag peach">${escapeHTML(question.area)}</span><span class="tag">${escapeHTML(question.subject)}</span><span class="tag">${escapeHTML(question.primaryTopic)}</span><span class="tag">${escapeHTML(question.difficulty || 'Sem nível')}</span>${(question.relatedSubjects||[]).map(subject=>`<span class="tag">Interdisciplinar: ${escapeHTML(subject)}</span>`).join('')}${question.classificationConfidence != null ? `<span class="tag">Classificação ${Math.round(question.classificationConfidence*100)}% confiança</span>` : ''}</div>${textBase ? `<div class="base-text"><b>${escapeHTML(textBase.title || 'Texto-base')}</b><br>${richText(textBaseDisplayContent(textBase, textBaseQuestions))}</div>` : ''}${beforeStemHtml}<div class="exam-stem">${richText(question.statement)}</div>${afterStemHtml}${renderQuestionReferences(question)}<div class="answer-options">${alternatives}</div>${renderQuestionImages(question,['after_alternatives'])}${renderQuestionTables(question,['after_alternatives'])}${renderQuestionEquations(question,['after_alternatives'])}${generalExplanationHtml}${alternativeCommentsHtml ? `<h3>Comentários das alternativas</h3>${alternativeCommentsHtml}` : ''}${versionHistoryHtml}<div class="fine-print">Origem: ${escapeHTML(question.source?.name || question.source?.exam || 'Não informada')} · Identificador: ${escapeHTML(question.id)}</div>`, `<button class="button secondary" data-action="question-review" data-id="${safeAttr(id)}">Adicionar revisão</button><button class="button secondary" data-action="edit-question" data-id="${safeAttr(id)}">Editar classificação</button><button class="button primary" data-action="favorite" data-id="${safeAttr(id)}">${question.favorite ? '★ Favorita' : '☆ Favoritar'}</button>`, 'BANCO DE QUESTÕES');
   await hydrateAssetImages($('#modalBody'));
 }
 
@@ -2008,7 +2159,7 @@ async function createActivityFromIds(ids, title) {
     toast('Há uma atividade em andamento. Retome-a antes de iniciar outra.');
     return;
   }
-  const validIds = [...new Set(ids.filter(id=>questionById(id)))]; if (!validIds.length) return;
+  const validIds = orderQuestionIdsWithTextBaseGroups(ids, state.data.questions); if (!validIds.length) return;
   const activity = { id: makeId('activity'), title, questionIds: validIds, status: 'running', createdAt: nowISO(), startedAt: nowISO(), activeSince: nowISO(), elapsedSecs: 0, config: { correctionMode: 'end', showErrors: false, commentMode: 'available', navigationMode: 'free', timerEnabled: false, timerMinutes: 90, negativeScoring: false, strategy: 'import' } };
   await putRecord(state.db, 'activities', activity); state.currentActivity = activity; state.activityAnswers = new Map(); state.activityStart = Date.now(); await refreshData(); pageNavigate('activity');
 }
@@ -2346,7 +2497,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.5.6');
+  await setSetting(state.db, 'appVersion', '1.6.0');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2548,6 +2699,18 @@ document.addEventListener('click', async event => {
   if (areaButton) { pageNavigate('bank'); $('#filterArea').value = areaButton.dataset.filterArea; renderBank(); return; }
   const openQuestion = event.target.closest('[data-open-question]');
   if (openQuestion) { await openQuestionDetail(openQuestion.dataset.openQuestion); return; }
+  const resultBaseLink = event.target.closest('a.base-return[href^="#result-base-"]');
+  if (resultBaseLink) {
+    event.preventDefault();
+    document.querySelector(resultBaseLink.getAttribute('href'))?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    return;
+  }
+  const baseJump = event.target.closest('[data-jump-textbase]');
+  if (baseJump) {
+    const targetBase = document.getElementById(`exam-base-${baseJump.dataset.jumpTextbase}`);
+    if (targetBase) targetBase.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    return;
+  }
   const jump = event.target.closest('[data-jump]');
   if (jump) {
     const ids = state.currentActivity?.questionIds || [];
@@ -2608,8 +2771,9 @@ document.addEventListener('click', async event => {
     else if (action === 'save-import-task') await saveImportTask(false);
     else if (action === 'resolve-import-task') await saveImportTask(true);
     else if (action === 'task-select-visible') {
-      const candidates=taskBuilderCandidates(); const page=state.importTaskDraft?.manualPage||0; const visible=candidates.slice(page*50,(page+1)*50);
-      visible.forEach(q=>state.importTaskDraft.selectedIds.add(q.id)); renderImportTaskBuilder();
+      const draft=state.importTaskDraft;
+      (draft?.visibleUnits || []).forEach(unit => unit.questions.forEach(question => draft.selectedIds.add(question.id)));
+      renderImportTaskBuilder();
     }
     else if (action === 'task-clear-selection') { state.importTaskDraft?.selectedIds.clear(); renderImportTaskBuilder(); }
     else if (action === 'start-pending-task') await startPendingTask(actionButton.dataset.id);
@@ -2695,9 +2859,9 @@ document.addEventListener('change', async event => {
     if(target.checked) state.selectedPackageKeys.add(target.dataset.packageSelect); else state.selectedPackageKeys.delete(target.dataset.packageSelect);
     renderPackageHistory(); return;
   }
-  if (target.matches('[data-package-task-question]')) {
-    if(target.checked) state.importTaskDraft?.selectedIds.add(target.dataset.packageTaskQuestion);
-    else state.importTaskDraft?.selectedIds.delete(target.dataset.packageTaskQuestion);
+  if (target.matches('[data-package-task-unit]')) {
+    const unit=state.importTaskDraft?.visibleUnits?.[Number(target.dataset.packageTaskUnit)];
+    if(unit) for(const question of unit.questions){if(target.checked) state.importTaskDraft.selectedIds.add(question.id);else state.importTaskDraft.selectedIds.delete(question.id);}
     renderImportTaskBuilder(); return;
   }
   if (target.matches('[data-error-reason]')) {

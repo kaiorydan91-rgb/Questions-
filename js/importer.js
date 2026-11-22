@@ -216,7 +216,10 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
   if (!Array.isArray(pkg.questions)) throw new Error('O pacote precisa conter uma lista "questions".');
   if (pkg.questions.length === 0) throw new Error('O pacote não contém questões. Adicione pelo menos uma questão antes de importar.');
   if (pkg.questions.length > 100000) throw new Error('O pacote excede o limite de 100.000 questões por arquivo. Divida em lotes menores.');
-  const packageMeta = { source: pkg.source ?? pkg.provenance ?? {} };
+  const packageMeta = { source: pkg.source ?? pkg.provenance ?? pkg.sourceExam ?? pkg.exam ?? {} };
+  if (!packageMeta.source || typeof packageMeta.source !== 'object' || !Object.keys(packageMeta.source).length) {
+    packageMeta.source = { packageId: str(pkg.packageId ?? pkg.package_id) };
+  }
   const supportedTypes = new Set(['multiple_choice','multiple-choice','mcq','multipla_escolha','múltipla escolha','true_false','verdadeiro_falso','vf','assertion_set','multiple_assertions','afirmacoes','assercoes']);
   const unsupported = pkg.questions.find(raw => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
@@ -253,10 +256,10 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
   const textBasesRaw = pkg.textBases ?? pkg.text_bases ?? pkg.textosBase ?? [];
   if (!Array.isArray(textBasesRaw)) throw new Error('A lista textBases precisa ser um array.');
   if (textBasesRaw.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw new Error('Há um texto-base que não está em um formato de objeto válido.');
-  const textBases = textBasesRaw.map(item => ({ id: str(item.id), title: str(item.title ?? item.titulo), content: str(item.content ?? item.text ?? item.conteudo), source: item.source ?? {}, updatedAt: new Date().toISOString() }));
-  const textBaseIds = new Set(textBases.map(item => item.id));
+  let textBases = textBasesRaw.map(item => ({ id: str(item.id), title: str(item.title ?? item.titulo), content: str(item.content ?? item.text ?? item.conteudo), source: item.source && typeof item.source === 'object' && Object.keys(item.source).length ? item.source : packageMeta.source, updatedAt: new Date().toISOString() }));
   if (textBases.some(item => !item.id || !item.content)) throw new Error('Há um texto-base sem identificador ou conteúdo.');
-  if (textBaseIds.size !== textBases.length) throw new Error('Há identificadores repetidos na lista de textos-base do pacote.');
+  const initialTextBaseIds = new Set(textBases.map(item => item.id));
+  if (initialTextBaseIds.size !== textBases.length) throw new Error('Há identificadores repetidos na lista de textos-base do pacote.');
   const existingTextBases = await getAll(db, 'textBases');
   const existingTextBaseMap = new Map(existingTextBases.map(item => [item.id, item]));
   for (const item of textBases) {
@@ -265,7 +268,59 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
       throw new Error(`O texto-base ${item.id} já existe com conteúdo diferente. Use outro ID ou resolva o conflito antes de importar, para evitar sobrescrever o texto existente.`);
     }
   }
-  for (const item of existingTextBases) textBaseIds.add(item.id);
+  // Canonicalize identical shared texts from the same exam/source even when the incoming
+  // package assigned them different IDs. This prevents the same long prompt from being
+  // duplicated into separate groups merely because of inconsistent textBaseId values.
+  const sourceIdentity = source => {
+    const value = source && typeof source === 'object' ? source : {};
+    const institution = value.institution ?? value.instituicao ?? value.organization ?? value.org ?? '';
+    const exam = value.exam ?? value.title ?? value.prova ?? value.name ?? '';
+    const packageId = value.packageId ?? value.package_id ?? '';
+    const year = value.year ?? value.examYear ?? value.ano ?? '';
+    return normalizeSearch([institution, exam, year, packageId].join('|'));
+  };
+  const sharedTextSignature = (item, fallbackSource = null) => {
+    const content = normalizeSearch(item.content).replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+    const itemSource = item.source && typeof item.source === 'object' && Object.keys(item.source).length ? item.source : fallbackSource;
+    const sourceKey = sourceIdentity(itemSource) || (fallbackSource ? `package:${normalizeSearch(pkg.packageId || pkg.id || 'incoming')}` : '');
+    return content && sourceKey ? `${sourceKey}::${content}` : '';
+  };
+  const textBaseAliases = new Map();
+  const canonicalBySignature = new Map();
+  // Older records may not have source metadata on the textBase itself. Infer it from
+  // a linked question when possible, so the next import can reuse the existing base.
+  const existingQuestionsForTextBases = textBases.length ? await getAll(db, 'questions') : [];
+  const existingSourceByTextBaseId = new Map();
+  for (const question of existingQuestionsForTextBases) {
+    if (question.textBaseId && !existingSourceByTextBaseId.has(question.textBaseId) && sourceIdentity(question.source)) {
+      existingSourceByTextBaseId.set(question.textBaseId, question.source);
+    }
+  }
+  // Existing canonical records are preferred so reimports link to the text already stored.
+  for (const item of existingTextBases) {
+    const source = sourceIdentity(item.source) ? item.source : (existingSourceByTextBaseId.get(item.id) || item.source);
+    const signature = sharedTextSignature({ ...item, source });
+    if (signature && !canonicalBySignature.has(signature)) canonicalBySignature.set(signature, item.id);
+  }
+  const canonicalTextBases = [];
+  for (const item of textBases) {
+    const signature = sharedTextSignature(item, packageMeta.source);
+    const canonicalId = signature ? canonicalBySignature.get(signature) : null;
+    if (canonicalId) textBaseAliases.set(item.id, canonicalId);
+    else {
+      canonicalBySignature.set(signature || `id:${item.id}`, item.id);
+      canonicalTextBases.push(item);
+    }
+  }
+  for (const question of questions) if (textBaseAliases.has(question.textBaseId)) question.textBaseId = textBaseAliases.get(question.textBaseId);
+  textBases = canonicalTextBases;
+  const textBaseIds = new Set([...textBases.map(item => item.id), ...existingTextBaseMap.keys()]);
+  for (const item of textBases) {
+    const existing = existingTextBaseMap.get(item.id);
+    if (existing && (normalizeSearch(existing.content) !== normalizeSearch(item.content) || normalizeSearch(existing.title) !== normalizeSearch(item.title))) {
+      throw new Error(`O texto-base ${item.id} já existe com conteúdo diferente. Use outro ID ou resolva o conflito antes de importar, para evitar sobrescrever o texto existente.`);
+    }
+  }
   const textBasesToWrite = textBases.filter(item => !existingTextBaseMap.has(item.id));
 
   let zipFiles = new Map();
