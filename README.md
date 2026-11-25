@@ -1,4 +1,16 @@
-# Grafia Questions — versão 1.8.2
+# Grafia Questions — versão 1.8.3
+
+## Atualização 1.8.3 — Grifos por matéria e correção personalizada
+
+- Os grifos usam uma cor padrão por área do conhecimento: Linguagens (dourado), Ciências Humanas (azul), Ciências da Natureza (verde) e Exatas (violeta).
+- Em **Configurações → Cores dos grifos por matéria**, cada matéria pode receber uma cor própria da paleta. A opção **A** restaura a cor padrão da área.
+- Selecionar um trecho já grifado remove a marcação daquela seleção. Quando uma seleção atravessa uma marcação maior, o grifo é dividido para retirar somente o trecho selecionado.
+- “Como se sentiu?” usa três opções compactas lado a lado: **Dúvida**, **Chutei** e **Confiante**.
+- A correção de atividades pode acontecer somente no final, após cada questão (com botão **Confirmar resposta**) ou em blocos de N questões (com botão **Corrigir bloco** depois que todas as respostas do bloco forem marcadas).
+- O último bloco pode ter menos questões do que o intervalo escolhido e ainda pode ser corrigido separadamente.
+- Questões corrigidas corretamente recebem destaque verde discreto na navegação. Respostas incorretas e ainda não corrigidas não recebem esse destaque.
+- As configurações de correção são gravadas na atividade/tarefa e preservadas ao sair e retomar.
+- Atualizado o identificador de versão e o cache offline para 1.8.3. O formato do banco local não mudou.
 
 ## Atualização 1.8.2 — Grifo automático e navegação compacta
 
