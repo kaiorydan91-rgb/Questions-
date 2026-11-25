@@ -40,6 +40,71 @@ const TOPIC_SUBJECTS = {
   'História do Brasil': ['História'], 'História Geral': ['História'], 'Filosofia': ['Filosofia'], 'Sociologia': ['Sociologia']
 };
 const SUBJECT_AREAS = Object.fromEntries(Object.entries(SUBJECTS).flatMap(([area, subjects]) => subjects.map(subject => [subject, area])));
+const HIGHLIGHT_PALETTE = [
+  { id: 'gold', label: 'Dourado', hex: '#F0C96B' },
+  { id: 'blue', label: 'Azul', hex: '#79B5E3' },
+  { id: 'green', label: 'Verde', hex: '#83C9A1' },
+  { id: 'violet', label: 'Violeta', hex: '#B9A0E5' },
+  { id: 'pink', label: 'Rosa', hex: '#E7A2B7' },
+  { id: 'orange', label: 'Laranja', hex: '#EBA66F' }
+];
+const AREA_HIGHLIGHT_DEFAULTS = {
+  'Linguagens': '#F0C96B',
+  'Ciências Humanas': '#79B5E3',
+  'Ciências da Natureza': '#83C9A1',
+  'Exatas': '#B9A0E5'
+};
+const DEFAULT_ACTIVITY_CONFIG = {
+  correctionMode: 'end', correctionInterval: 5, showErrors: false,
+  commentMode: 'available', navigationMode: 'free', timerEnabled: false,
+  timerMinutes: 90, negativeScoring: false
+};
+function normalizeActivityConfig(config = {}) {
+  const mode = ['end', 'immediate', 'interval'].includes(config.correctionMode) ? config.correctionMode : 'end';
+  return {
+    ...DEFAULT_ACTIVITY_CONFIG,
+    ...config,
+    correctionMode: mode,
+    correctionInterval: Math.min(100, Math.max(2, Number(config.correctionInterval) || 5))
+  };
+}
+function readCorrectionConfig(modeId = 'correctionMode', intervalId = 'correctionInterval') {
+  return normalizeActivityConfig({
+    correctionMode: document.getElementById(modeId)?.value || 'end',
+    correctionInterval: document.getElementById(intervalId)?.value || 5
+  });
+}
+function activityConfigFromBuilder(strategy = 'saved-task') {
+  return normalizeActivityConfig({
+    ...DEFAULT_ACTIVITY_CONFIG,
+    ...readCorrectionConfig(),
+    commentMode: $('#commentMode')?.value || 'available',
+    navigationMode: $('#navigationMode')?.value || 'free',
+    timerEnabled: Boolean($('#timerEnabled')?.checked),
+    timerMinutes: Math.min(600, Math.max(1, Number($('#timerMinutes')?.value) || 90)),
+    negativeScoring: Boolean($('#negativeScoring')?.checked),
+    strategy
+  });
+}
+function getHighlightColorMap() {
+  return state.data.settings?.find(item => item.key === 'highlightColors')?.value || {};
+}
+function getQuestionHighlightColor(question) {
+  const subject = String(question?.subject || '').trim();
+  const configured = getHighlightColorMap()[subject];
+  if (configured && HIGHLIGHT_PALETTE.some(color => color.hex === configured)) return configured;
+  const area = question?.area || SUBJECT_AREAS[subject];
+  return AREA_HIGHLIGHT_DEFAULTS[area] || '#F0C96B';
+}
+function answerCorrectionReleased(answer, config, final = false) {
+  if (final) return true;
+  const mode = config?.correctionMode || 'end';
+  if (mode === 'immediate' || mode === 'interval') return Boolean(answer?.correctionReleased);
+  return false;
+}
+function answerIsLocked(answer, config) {
+  return Boolean(answerCorrectionReleased(answer, config));
+}
 const state = {
   db: null, data: {}, page: 'home', importDraft: null, currentActivity: null,
   activityAnswers: new Map(), activityTimer: null, activityStart: null,
@@ -157,6 +222,7 @@ async function refreshData(render = true) {
   state.data.imports ||= [];
   state.data.aliases ||= [];
   state.data.topics ||= [];
+  state.data.settings ||= [];
   // The activity picker only exposes the fixed 100-topic catalog and topics
   // deliberately saved by the user. Legacy question-derived entries are purged.
   const savedTopics = state.data.topics.filter(isCustomTopic);
@@ -590,9 +656,8 @@ function renderActivityBuilder() {
   if (search && search.value !== state.activityTopicSearch) search.value = state.activityTopicSearch;
   $('#selectedActivityTopics').innerHTML = state.activityFilters.topics.map(topic => `<button type="button" class="selected-topic" data-remove-activity-topic="${safeAttr(topic)}"><span>${escapeHTML(topic)}</span><b aria-hidden="true">×</b></button>`).join('');
   renderActivityTopicList();
-  const correctionAtEnd = $('#correctionMode').value === 'end';
-  $('#showErrors').disabled = correctionAtEnd;
-  if (correctionAtEnd) $('#showErrors').checked = false;
+  const correctionMode = $('#correctionMode')?.value || 'end';
+  $('#correctionIntervalRow')?.classList.toggle('hidden', correctionMode !== 'interval');
   $('#timerMinutes').disabled = !$('#timerEnabled').checked;
   $('#timerDurationRow').style.opacity = $('#timerEnabled').checked ? '1' : '.55';
 }
@@ -717,10 +782,7 @@ async function makeActivity() {
     id: makeId('activity'), title: `Atividade · ${new Date().toLocaleDateString('pt-BR')}`,
     questionIds: selected.map(q => q.id), status: 'running', createdAt: nowISO(), startedAt: nowISO(), activeSince: nowISO(), elapsedSecs: 0,
     config: {
-      correctionMode: $('#correctionMode').value, showErrors: $('#showErrors').checked,
-      commentMode: $('#commentMode').value, navigationMode: $('#navigationMode').value,
-      timerEnabled: $('#timerEnabled').checked, timerMinutes: Math.min(600, Math.max(1, Number($('#timerMinutes').value) || 90)),
-      negativeScoring: $('#negativeScoring').checked, strategy,
+      ...activityConfigFromBuilder(strategy),
       filters: { areas: [...state.activityFilters.areas], subjects: [...state.activityFilters.subjects], topics: [...state.activityFilters.topics], difficulty: $('#activityDifficulty').value }
     }
   };
@@ -986,15 +1048,18 @@ function renderTextBaseContent(textBase, relatedQuestions = []) {
 }
 
 function renderResponseOptions(question, current = '', answerRecord = {}, config = null, final = false) {
+  const locked = answerIsLocked(answerRecord, config);
+  const disabled = locked ? 'disabled' : '';
   if (question.type === 'true_false') {
-    return `<div class="answer-options" id="options-q-${safeAttr(question.id)}">${[['V','Verdadeiro'],['F','Falso']].map(([value,label]) => `<label class="answer-option"><input type="radio" name="answer-${safeAttr(question.id)}" value="${value}" ${current === value ? 'checked' : ''}><span><b>${value}</b> — ${label}</span></label>`).join('')}</div>`;
+    return `<div class="answer-options" id="options-q-${safeAttr(question.id)}">${[['V','Verdadeiro'],['F','Falso']].map(([value,label]) => `<label class="answer-option"><input type="radio" name="answer-${safeAttr(question.id)}" value="${value}" ${current === value ? 'checked' : ''} ${disabled}><span><b>${value}</b> — ${label}</span></label>`).join('')}</div>`;
   }
   if (question.type === 'assertion_set') {
     const chars = String(current || '').split('');
-    return `<div class="answer-options" id="options-q-${safeAttr(question.id)}">${question.statements.map((item,index) => `<label class="statement-answer"><span><b>${index + 1}.</b> ${richText(item.text)}</span><select data-statement-index="${index}" aria-label="Resposta da afirmação ${index + 1}"><option value="">Selecione</option><option value="V" ${chars[index] === 'V' ? 'selected' : ''}>Verdadeiro</option><option value="F" ${chars[index] === 'F' ? 'selected' : ''}>Falso</option></select></label>`).join('')}</div>`;
+    return `<div class="answer-options" id="options-q-${safeAttr(question.id)}">${question.statements.map((item,index) => `<label class="statement-answer"><span><b>${index + 1}.</b> ${richText(item.text)}</span><select data-statement-index="${index}" aria-label="Resposta da afirmação ${index + 1}" ${disabled}><option value="">Selecione</option><option value="V" ${chars[index] === 'V' ? 'selected' : ''}>Verdadeiro</option><option value="F" ${chars[index] === 'F' ? 'selected' : ''}>Falso</option></select></label>`).join('')}</div>`;
   }
   const dimmed = new Set(answerRecord?.dimmedOptions || answerRecord?.eliminatedOptions || []);
-  const canShowComment = final ? config?.commentMode !== 'hidden' : config?.commentMode === 'available' && config?.correctionMode === 'immediate';
+  const released = answerCorrectionReleased(answerRecord, config, final);
+  const canShowComment = released && (final ? config?.commentMode !== 'hidden' : config?.commentMode === 'available');
   const selectedKey = String(current || '').trim().toUpperCase();
   const isComplete = responseIsComplete(question, current);
   const isCorrect = isComplete && responseIsCorrect(question, current);
@@ -1004,14 +1069,14 @@ function renderResponseOptions(question, current = '', answerRecord = {}, config
     const specificComment = selected && canShowComment && isComplete ? getAlternativeExplanationText(question, key) : '';
     const specificImages = selected && canShowComment && isComplete ? renderAlternativeExplanationImages(question, key) : '';
     const hasSpecificComment = Boolean(specificComment || specificImages);
-    return `<div class="answer-option-row"><label class="answer-option ${isDimmed ? 'dimmed' : ''}" data-hold-option="${safeAttr(key)}" data-question-option="${safeAttr(question.id)}" aria-label="Alternativa ${escapeHTML(key)}"><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${selected ? 'checked' : ''}><span class="option-content"><b>${escapeHTML(key)})</b> ${renderOptionContent(question,key,value)}</span></label>${hasSpecificComment ? `<div class="alternative-comment ${isCorrect ? 'correct' : 'wrong'}"><b>${isCorrect ? 'Comentário da alternativa marcada' : `Por que a alternativa ${escapeHTML(key)} está incorreta`}</b>${specificComment ? `<p>${richText(specificComment)}</p>` : ''}${specificImages}</div>` : ''}</div>`;
+    return `<div class="answer-option-row"><label class="answer-option ${isDimmed ? 'dimmed' : ''}" data-hold-option="${safeAttr(key)}" data-question-option="${safeAttr(question.id)}" aria-label="Alternativa ${escapeHTML(key)}"><input type="radio" name="answer-${safeAttr(question.id)}" value="${safeAttr(key)}" ${selected ? 'checked' : ''} ${disabled}><span class="option-content"><b>${escapeHTML(key)})</b> ${renderOptionContent(question,key,value)}</span></label>${hasSpecificComment ? `<div class="alternative-comment ${isCorrect ? 'correct' : 'wrong'}"><b>${isCorrect ? 'Comentário da alternativa marcada' : `Por que a alternativa ${escapeHTML(key)} está incorreta`}</b>${specificComment ? `<p>${richText(specificComment)}</p>` : ''}${specificImages}</div>` : ''}</div>`;
   }).join('')}</div>`;
 }
 
 function renderQuestionFeedback(question, answer, config, final = false) {
   if (!answer?.response || !responseIsComplete(question, answer.response)) return '';
-  const reveal = final || (config.correctionMode === 'immediate' && config.showErrors);
-  const showComment = final ? config.commentMode !== 'hidden' : config.commentMode === 'available' && config.correctionMode === 'immediate';
+  const reveal = answerCorrectionReleased(answer, config, final);
+  const showComment = final ? config.commentMode !== 'hidden' : reveal && config.commentMode === 'available';
   const explanationImages = showComment ? renderExplanationImages(question) : '';
   const hasExplanation = Boolean(showComment && (question.explanation || explanationImages));
   if (!reveal && !hasExplanation) return '';
@@ -1050,6 +1115,7 @@ function updateNavigationAnswer(questionId) {
     button.setAttribute('aria-label', `Questão ${button.querySelector('.exam-number-index')?.textContent || ''}`);
   }
   button.classList.toggle('answered', responseIsComplete(question, answer?.response));
+  button.classList.toggle('correct-result', Boolean(answer?.correctionReleased && answer?.isCorrect === true));
   button.classList.toggle('review-mark', Boolean(answer?.markedForReview));
 }
 function keepNavigationItemVisible(button, behavior = 'smooth') {
@@ -1107,8 +1173,54 @@ function bindActivityNavigationSync() {
   scheduleActivityNavigationSync();
 }
 
+function renderConfidenceControl(questionId, answer = {}) {
+  const choices = [
+    ['unsure', 'Dúvida', 'Com dúvida'],
+    ['guess', 'Chutei', 'Chutei'],
+    ['confident', 'Confiante', 'Confiante']
+  ];
+  const selected = answer.confidence || 'unsure';
+  const disabled = answer.correctionReleased ? 'disabled' : '';
+  return `<div class="confidence-control" id="confidence-control-${safeAttr(questionId)}"><span>Como se sentiu?</span><div class="confidence-options" role="group" aria-label="Como se sentiu ao responder?">${choices.map(([value,label,full]) => `<button type="button" class="confidence-choice ${selected === value ? 'selected' : ''}" data-confidence-choice="${value}" data-confidence-question="${safeAttr(questionId)}" aria-pressed="${selected === value}" title="${full}" ${disabled}>${label}</button>`).join('')}</div></div>`;
+}
+function renderBatchCorrectionPanel(batchIndex, ids, config) {
+  const questions = ids.map(questionById).filter(Boolean);
+  const answers = questions.map(question => state.activityAnswers.get(question.id) || {});
+  const released = answers.filter(answer => answer.correctionReleased).length;
+  const complete = answers.filter((answer, index) => responseIsComplete(questions[index], answer.response)).length;
+  const allReleased = questions.length > 0 && released === questions.length;
+  const ready = questions.length > 0 && complete === questions.length && !allReleased;
+  const first = batchIndex * config.correctionInterval + 1;
+  const last = first + questions.length - 1;
+  const correct = answers.filter(answer => answer.correctionReleased && answer.isCorrect === true).length;
+  const title = questions.length === 1 ? `Questão ${first}` : `Questões ${first}–${last}`;
+  const status = allReleased ? `Bloco corrigido · ${correct}/${questions.length} acertos` : `${complete}/${questions.length} respostas marcadas`;
+  return `<section class="batch-correction-panel ${allReleased ? 'completed' : ''}" data-batch-panel="${batchIndex}"><div><b>${escapeHTML(title)}</b><small>${status}</small></div>${allReleased ? '<span class="batch-done-mark">✓</span>' : `<button type="button" class="button primary small" data-action="correct-batch" data-batch-index="${batchIndex}" ${ready ? '' : 'disabled'}>Corrigir bloco</button>`}</section>`;
+}
+function refreshBatchCorrectionPanels() {
+  const activity = state.currentActivity;
+  const config = normalizeActivityConfig(activity?.config || {});
+  if (!activity || config.correctionMode !== 'interval') return;
+  const interval = config.correctionInterval;
+  $$('.batch-correction-panel[data-batch-panel]').forEach(panel => {
+    const index = Number(panel.dataset.batchPanel);
+    const ids = activity.questionIds.slice(index * interval, (index + 1) * interval);
+    panel.outerHTML = renderBatchCorrectionPanel(index, ids, config);
+  });
+}
+function renderQuestionAnswerActions(q, answer, config) {
+  const complete = responseIsComplete(q, answer?.response);
+  const confirmed = Boolean(answer?.correctionReleased);
+  const confirmAction = config.correctionMode === 'immediate' && complete && !confirmed
+    ? `<button type="button" class="button primary small confirm-answer-button" data-action="confirm-answer" data-id="${safeAttr(q.id)}">Confirmar resposta</button>`
+    : config.correctionMode === 'immediate' && confirmed ? '<span class="confirmed-answer-label">Resposta confirmada</span>' : '';
+  const saveLabel = confirmed ? 'Resposta corrigida' : (answer?.response ? (complete ? 'Resposta salva · aguardando correção' : 'Resposta parcial salva') : 'Ainda não respondida');
+  return `${confirmAction}<span class="save-indicator" id="saved-${safeAttr(q.id)}">${saveLabel}</span>`;
+}
+
 function renderActivityQuestionCard(q, index, options = {}) {
   const answer = state.activityAnswers.get(q.id);
+  const config = normalizeActivityConfig(state.currentActivity.config || {});
   const textBase = options.textBase || null;
   const showBase = Boolean(options.showBase && textBase);
   const baseId = textBase?.id || '';
@@ -1116,7 +1228,7 @@ function renderActivityQuestionCard(q, index, options = {}) {
   const returnToBase = textBase && !showBase ? `<button type="button" class="base-return" data-jump-textbase="${safeAttr(baseId)}">↩ Voltar ao texto-base</button>` : '';
   const questionHead = `<div class="exam-q-head"><b>Questão ${index + 1}</b><div class="question-meta"><span class="tag peach">${escapeHTML(q.subject || q.area)}</span><span class="tag">${hasExplanationContent(q) ? 'Comentada' : 'Gabarito'}</span><button class="icon-action ${answer?.markedForReview ? 'active' : ''}" data-action="mark-review" data-id="${safeAttr(q.id)}" title="Marcar para revisar">⚑</button></div></div>`;
   const leadHtml = showBase ? `${baseHtml}${questionHead}` : `${questionHead}${returnToBase}`;
-  return `<article class="glass-card exam-question ${showBase ? 'exam-question-base' : ''}" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}">${leadHtml}${renderQuestionComposition(q)}${renderResponseOptions(q, answer?.response || '', answer, state.currentActivity.config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools"><label class="confidence-select"><span>Como se sentiu?</span><select data-confidence="${safeAttr(q.id)}"><option value="unsure" ${answer?.confidence === 'unsure' || !answer?.confidence ? 'selected' : ''}>Com dúvida</option><option value="guess" ${answer?.confidence === 'guess' ? 'selected' : ''}>Chutei</option><option value="confident" ${answer?.confidence === 'confident' ? 'selected' : ''}>Confiante</option></select></label><span class="save-indicator" id="saved-${safeAttr(q.id)}">${answer?.response ? (responseIsComplete(q, answer.response) ? 'Resposta salva' : 'Resposta parcial salva') : 'Ainda não respondida'}</span></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, state.currentActivity.config)}</div></article>`;
+  return `<article class="glass-card exam-question ${showBase ? 'exam-question-base' : ''}" data-question-card="${safeAttr(q.id)}" id="exam-q-${safeAttr(q.id)}">${leadHtml}${renderQuestionComposition(q)}${renderResponseOptions(q, answer?.response || '', answer, config)}${renderQuestionImages(q,['after_alternatives','after-alternatives'])}${renderQuestionTables(q,['after_alternatives','after-alternatives'])}${renderQuestionEquations(q,['after_alternatives','after-alternatives'])}<div class="question-tools">${renderConfidenceControl(q.id, answer || {})}<div class="question-answer-actions" id="question-answer-actions-${safeAttr(q.id)}">${renderQuestionAnswerActions(q, answer, config)}</div></div><div id="feedback-${safeAttr(q.id)}">${renderQuestionFeedback(q, answer, config)}</div></article>`;
 }
 
 async function renderSession() {
@@ -1134,13 +1246,30 @@ async function renderSession() {
   const units = buildQuestionUnits(questions);
   const displayQuestions = flattenQuestionUnits(units);
   const questionIndex = new Map(displayQuestions.map((q,index)=>[q.id,index]));
+  const config = normalizeActivityConfig(activity.config || {});
   const answered = displayQuestions.filter(q => answerCount(q.id)).length;
-  const cardsHtml = units.map(unit => unit.questions.map((q,localIndex) => {
-    const index = questionIndex.get(q.id) ?? 0;
-    const base = unit.textBaseId ? textBaseById(unit.textBaseId) : null;
-    return renderActivityQuestionCard(q, index, { textBase: base, baseQuestions: unit.questions, showBase: Boolean(base && localIndex === 0) });
-  }).join('')).join('');
-  const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${displayQuestions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${displayQuestions.length ? answered / displayQuestions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${cardsHtml}</div><aside class="exam-side"><section class="glass-card exam-nav-panel"><h3>Navegação</h3><div class="exam-number-grid" id="examNumberGrid">${displayQuestions.map((q,index) => { const answer = state.activityAnswers.get(q.id); const navAnswer = navigationResponseLabel(q, answer?.response); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${answer?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index + 1}${navAnswer ? `, resposta marcada ${safeAttr(navAnswer)}` : ''}"><span class="exam-number-index">${index + 1}</span>${navAnswer ? `<span class="exam-number-answer">${escapeHTML(navAnswer)}</span>` : ''}</button>`; }).join('')}</div></section><section class="glass-card exam-actions-panel"><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></section></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${displayQuestions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div></div>`;
+  const detailsById = new Map();
+  units.forEach(unit => unit.questions.forEach((question, localIndex) => detailsById.set(question.id, { unit, localIndex })));
+  let cardsHtml = '';
+  if (config.correctionMode === 'interval') {
+    const interval = config.correctionInterval;
+    for (let start = 0; start < displayQuestions.length; start += interval) {
+      const chunk = displayQuestions.slice(start, start + interval);
+      cardsHtml += chunk.map(q => {
+        const detail = detailsById.get(q.id);
+        const base = detail?.unit.textBaseId ? textBaseById(detail.unit.textBaseId) : null;
+        return renderActivityQuestionCard(q, questionIndex.get(q.id) ?? 0, { textBase: base, baseQuestions: detail?.unit.questions || [q], showBase: Boolean(base && detail?.localIndex === 0) });
+      }).join('');
+      cardsHtml += renderBatchCorrectionPanel(Math.floor(start / interval), chunk.map(q => q.id), config);
+    }
+  } else {
+    cardsHtml = units.map(unit => unit.questions.map((q,localIndex) => {
+      const index = questionIndex.get(q.id) ?? 0;
+      const base = unit.textBaseId ? textBaseById(unit.textBaseId) : null;
+      return renderActivityQuestionCard(q, index, { textBase: base, baseQuestions: unit.questions, showBase: Boolean(base && localIndex === 0) });
+    }).join('')).join('');
+  }
+  const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${displayQuestions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${displayQuestions.length ? answered / displayQuestions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${cardsHtml}</div><aside class="exam-side"><section class="glass-card exam-nav-panel"><h3>Navegação</h3><div class="exam-number-grid" id="examNumberGrid">${displayQuestions.map((q,index) => { const answer = state.activityAnswers.get(q.id); const navAnswer = navigationResponseLabel(q, answer?.response); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${answer?.correctionReleased && answer?.isCorrect === true ? 'correct-result' : ''} ${answer?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index + 1}${navAnswer ? `, resposta marcada ${safeAttr(navAnswer)}` : ''}"><span class="exam-number-index">${index + 1}</span>${navAnswer ? `<span class="exam-number-answer">${escapeHTML(navAnswer)}</span>` : ''}</button>`; }).join('')}</div></section><section class="glass-card exam-actions-panel"><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></section></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${displayQuestions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('#activitySession').innerHTML = html;
   $('.activity-layout').classList.add('hidden');
@@ -1149,8 +1278,8 @@ async function renderSession() {
   await hydrateAssetImages($('#activitySession'));
   for (const question of displayQuestions) {
     const marks = state.activityAnswers.get(question.id)?.highlights || [];
-    applyTextMarks($(`[data-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement');
-    applyTextMarks($(`[data-textbase-for="${CSS.escape(question.id)}"]`), marks, 'textBase');
+    applyTextMarks($(`[data-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement', getQuestionHighlightColor(question));
+    applyTextMarks($(`[data-textbase-for="${CSS.escape(question.id)}"]`), marks, 'textBase', getQuestionHighlightColor(question));
   }
   bindActivityNavigationSync();
   if (activity.config.timerEnabled) updateTimerLabel();
@@ -1158,37 +1287,98 @@ async function renderSession() {
 async function saveQuestionResponse(questionId) {
   const question = questionById(questionId);
   if (!question || !state.currentActivity) return;
+  const config = normalizeActivityConfig(state.currentActivity.config || {});
   const previous = state.activityAnswers.get(questionId) || {};
+  if (answerIsLocked(previous, config)) {
+    const options = $('#options-q-' + CSS.escape(questionId));
+    if (options) options.outerHTML = renderResponseOptions(question, previous.response || '', previous, config);
+    return;
+  }
   const response = getResponseFromQuestion(questionId, question);
   const complete = responseIsComplete(question, response);
   const record = {
     ...previous, id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id,
     questionId, response, confidence: previous.confidence || 'unsure', markedForReview: previous.markedForReview || false,
-    answeredAt: complete ? nowISO() : null, isCorrect: complete ? responseIsCorrect(question, response) : null,
-    updatedAt: nowISO()
+    correctionReleased: false, isCorrect: null, answeredAt: null, updatedAt: nowISO()
   };
   await putRecord(state.db, 'answers', record);
   syncAnswerCache(record);
-  const card = document.querySelector(`[data-question-card="${CSS.escape(questionId)}"]`);
-  if (!card) return;
-  const options = $('#options-q-' + CSS.escape(questionId));
-  if (options) options.outerHTML = renderResponseOptions(question, record.response || '', record, state.currentActivity.config);
-  const feedback = $('#feedback-' + CSS.escape(questionId));
-  if (feedback) feedback.innerHTML = renderQuestionFeedback(question, record, state.currentActivity.config);
-  await hydrateAssetImages(card);
-  const saved = $('#saved-' + CSS.escape(questionId));
-  if (saved) saved.textContent = response ? (complete ? 'Resposta salva automaticamente' : 'Resposta parcial salva automaticamente') : 'Ainda não respondida';
+  refreshQuestionAnswerUI(questionId);
   const count = state.currentActivity.questionIds.reduce((total, id) => total + answerCount(id), 0);
-  $('#examAnsweredCount').textContent = `${count} de ${state.currentActivity.questionIds.length} respondidas`;
-  $('#examProgressBar').style.width = `${count / state.currentActivity.questionIds.length * 100}%`;
+  const answeredCount = $('#examAnsweredCount');
+  if (answeredCount) answeredCount.textContent = `${count} de ${state.currentActivity.questionIds.length} respondidas`;
+  const progress = $('#examProgressBar');
+  if (progress) progress.style.width = `${count / state.currentActivity.questionIds.length * 100}%`;
+  updateNavigationAnswer(questionId);
+  refreshBatchCorrectionPanels();
+}
+function refreshQuestionAnswerUI(questionId) {
+  const question = questionById(questionId);
+  const answer = state.activityAnswers.get(questionId);
+  if (!question || !answer) return;
+  const config = normalizeActivityConfig(state.currentActivity?.config || {});
+  const options = $('#options-q-' + CSS.escape(questionId));
+  if (options) options.outerHTML = renderResponseOptions(question, answer.response || '', answer, config);
+  const feedback = $('#feedback-' + CSS.escape(questionId));
+  if (feedback) feedback.innerHTML = renderQuestionFeedback(question, answer, config);
+  const actions = $('#question-answer-actions-' + CSS.escape(questionId));
+  if (actions) actions.innerHTML = renderQuestionAnswerActions(question, answer, config);
+  const confidence = $('#confidence-control-' + CSS.escape(questionId));
+  if (confidence) confidence.outerHTML = renderConfidenceControl(questionId, answer);
   updateNavigationAnswer(questionId);
 }
+async function confirmQuestionAnswer(questionId) {
+  const question = questionById(questionId);
+  if (!question || !state.currentActivity || state.currentActivity.config?.correctionMode !== 'immediate') return;
+  const old = state.activityAnswers.get(questionId);
+  if (!old || !responseIsComplete(question, old.response)) return toast('Marque uma resposta completa antes de confirmar.');
+  if (old.correctionReleased) return;
+  const updated = { ...old, correctionReleased: true, confirmedAt: nowISO(), answeredAt: nowISO(), isCorrect: responseIsCorrect(question, old.response), updatedAt: nowISO() };
+  await putRecord(state.db, 'answers', updated);
+  syncAnswerCache(updated);
+  refreshQuestionAnswerUI(questionId);
+  toast(updated.isCorrect ? 'Resposta correta.' : 'Resposta registrada. Confira o gabarito.');
+}
+async function correctActivityBatch(batchIndex) {
+  const activity = state.currentActivity;
+  if (!activity || activity.status !== 'running') return;
+  const config = normalizeActivityConfig(activity.config || {});
+  if (config.correctionMode !== 'interval') return;
+  const start = Number(batchIndex) * config.correctionInterval;
+  const ids = activity.questionIds.slice(start, start + config.correctionInterval);
+  const questions = ids.map(questionById).filter(Boolean);
+  const answers = questions.map(question => state.activityAnswers.get(question.id));
+  if (!questions.length || answers.some((answer, index) => !answer || !responseIsComplete(questions[index], answer.response))) {
+    return toast('Complete todas as respostas deste bloco antes de corrigir.');
+  }
+  if (answers.every(answer => answer.correctionReleased)) return;
+  const stamp = nowISO();
+  const updates = questions.map((question, index) => ({
+    ...answers[index], correctionReleased: true, confirmedAt: stamp, answeredAt: stamp,
+    isCorrect: responseIsCorrect(question, answers[index].response), updatedAt: stamp
+  }));
+  await writeBatch(state.db, { answers: updates });
+  updates.forEach(update => syncAnswerCache(update));
+  updates.forEach(update => refreshQuestionAnswerUI(update.questionId));
+  refreshBatchCorrectionPanels();
+  const correct = updates.filter(update => update.isCorrect).length;
+  toast(`Bloco corrigido: ${correct} de ${updates.length} acertos.`);
+}
 async function setConfidence(questionId, confidence) {
+  if (!state.currentActivity) return;
   const old = state.activityAnswers.get(questionId) || { id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id, questionId, response: '' };
+  if (answerIsLocked(old, normalizeActivityConfig(state.currentActivity?.config || {}))) return;
   const next = { ...old, confidence, updatedAt: nowISO() };
   await putRecord(state.db, 'answers', next);
   syncAnswerCache(next);
+  const group = document.querySelector(`[data-confidence-question="${CSS.escape(questionId)}"]`)?.closest('.confidence-control');
+  if (group) group.querySelectorAll('[data-confidence-choice]').forEach(button => {
+    const selected = button.dataset.confidenceChoice === confidence;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
 }
+
 async function toggleReviewMark(questionId) {
   const old = state.activityAnswers.get(questionId) || { id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id, questionId, response: '' };
   const next = { ...old, markedForReview: !old.markedForReview, updatedAt: nowISO() };
@@ -1235,7 +1425,8 @@ async function finishActivity(timeExpired = false) {
   if (!timeExpired && !confirm('Entregar esta atividade? As respostas salvas serão corrigidas e o resultado ficará no histórico.')) return;
   state.finishingActivityId = finishingId;
   clearInterval(state.activityTimer);
-  const activity = state.currentActivity;
+  const activity = { ...state.currentActivity, config: normalizeActivityConfig(state.currentActivity.config || {}) };
+  state.currentActivity = activity;
   const questions = activity.questionIds.map(questionById).filter(Boolean);
   await loadActivityAnswers(activity.id);
   const responseRecords = [];
@@ -1255,7 +1446,7 @@ async function finishActivity(timeExpired = false) {
       const count = Object.keys(question.alternatives || {}).length;
       if (count > 1) netScore -= 1 / (count - 1);
     }
-    const updated = { ...answer, id: `${activity.id}::${question.id}`, activityId: activity.id, questionId: question.id, isCorrect: hasResponse ? isCorrect : null, completedAt: nowISO(), updatedAt: nowISO() };
+    const updated = { ...answer, id: `${activity.id}::${question.id}`, activityId: activity.id, questionId: question.id, isCorrect: hasResponse ? isCorrect : null, correctionReleased: true, completedAt: nowISO(), updatedAt: nowISO() };
     answerUpdates.push(updated);
     state.activityAnswers.set(question.id, updated);
     const oldReview = pendingReviewsByQuestion.get(question.id);
@@ -1328,8 +1519,8 @@ async function renderResult(activity) {
   await hydrateAssetImages($('#activitySession'));
   for (const question of questions) {
     const marks = state.activityAnswers.get(question.id)?.highlights || [];
-    applyTextMarks($(`[data-result-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement');
-    applyTextMarks($(`[data-result-textbase-for="${CSS.escape(question.id)}"]`), marks, 'textBase');
+    applyTextMarks($(`[data-result-statement-for="${CSS.escape(question.id)}"]`), marks, 'statement', getQuestionHighlightColor(question));
+    applyTextMarks($(`[data-result-textbase-for="${CSS.escape(question.id)}"]`), marks, 'textBase', getQuestionHighlightColor(question));
   }
 }
 
@@ -1600,6 +1791,14 @@ async function renderSettings() {
   const persisted = await navigator.storage?.persisted?.().catch(() => false);
   const usage = estimate?.usage ?? null; const quota = estimate?.quota ?? null;
   $('#storageDiagnostics').innerHTML = `<div class="diagnostic-row"><span>Questões</span><b>${counts.questions}</b></div><div class="diagnostic-row"><span>Imagens e arquivos</span><b>${counts.assets}</b></div><div class="diagnostic-row"><span>Atividades</span><b>${counts.activities}</b></div><div class="diagnostic-row"><span>Respostas registradas</span><b>${counts.answers}</b></div><div class="diagnostic-row"><span>Revisões</span><b>${counts.reviews}</b></div><div class="diagnostic-row"><span>Espaço utilizado pelo navegador</span><b>${usage == null ? 'Não informado' : formatBytes(usage)}</b></div><div class="diagnostic-row"><span>Limite estimado</span><b>${quota == null ? 'Não informado' : formatBytes(quota)}</b></div><div class="diagnostic-row"><span>Armazenamento persistente</span><b>${persisted ? 'Concedido' : 'Não concedido'}</b></div>`;
+  const colorMap = getHighlightColorMap();
+  const paletteMarkup = Object.entries(SUBJECTS).map(([area, subjects]) => `<section class="highlight-area-group"><div class="highlight-area-heading"><b>${escapeHTML(area)}</b><span>Cor padrão: <i style="--area-color:${AREA_HIGHLIGHT_DEFAULTS[area]}"></i></span></div>${subjects.map(subject => {
+    const custom = HIGHLIGHT_PALETTE.find(color => color.hex === colorMap[subject]);
+    const active = custom?.hex || AREA_HIGHLIGHT_DEFAULTS[area];
+    return `<div class="highlight-subject-row"><span>${escapeHTML(subject)}</span><div class="highlight-swatches"><button type="button" class="highlight-swatch area-swatch ${!custom ? 'selected' : ''}" style="--swatch-color:${AREA_HIGHLIGHT_DEFAULTS[area]}" data-highlight-subject="${safeAttr(subject)}" data-highlight-color="area" aria-label="${escapeHTML(subject)}: cor padrão da área" title="Cor padrão da área">A</button>${HIGHLIGHT_PALETTE.map(color => `<button type="button" class="highlight-swatch ${active === color.hex && Boolean(custom) ? 'selected' : ''}" style="--swatch-color:${color.hex}" data-highlight-subject="${safeAttr(subject)}" data-highlight-color="${color.hex}" aria-label="${escapeHTML(subject)}: ${color.label}" title="${color.label}"></button>`).join('')}</div></div>`;
+  }).join('')}</section>`).join('');
+  const highlightSettings = $('#highlightColorSettings');
+  if (highlightSettings) highlightSettings.innerHTML = paletteMarkup;
   const imports = [...state.data.imports].sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)).slice(0,20);
   $('#importHistoryEmpty').classList.toggle('hidden', imports.length > 0);
   $('#importHistory').innerHTML = imports.map(item => {
@@ -1609,6 +1808,17 @@ async function renderSettings() {
     const unavailable = '';
     return `<div class="history-row import-history-row"><div class="import-history-main"><b>${escapeHTML(item.packageName || item.fileName || 'Operação')}</b><small>${formatDate(item.createdAt, true)} · ${escapeHTML(item.operation || 'Importação')} · ${total} questões no pacote</small>${unavailable}</div><div class="import-history-actions"><span class="tag peach">${escapeHTML(item.status || 'Concluída')}</span>${canCreate ? `<button class="button primary" type="button" data-action="create-task-from-record" data-id="${safeAttr(item.id)}">Criar tarefa ↗</button>` : ''}<button class="button small danger" type="button" data-action="delete-import-package-from-record" data-id="${safeAttr(item.id)}">Excluir pacote e questões</button></div></div>`;
   }).join('');
+}
+async function saveHighlightColor(subject, color) {
+  const map = { ...getHighlightColorMap() };
+  if (color === 'area') delete map[subject];
+  else if (HIGHLIGHT_PALETTE.some(item => item.hex === color)) map[subject] = color;
+  await setSetting(state.db, 'highlightColors', map);
+  const existing = state.data.settings.find(item => item.key === 'highlightColors');
+  if (existing) { existing.value = map; existing.updatedAt = nowISO(); }
+  else state.data.settings.push({ key: 'highlightColors', value: map, updatedAt: nowISO() });
+  await renderSettings();
+  toast(`Cor do grifo de ${subject} atualizada.`);
 }
 function getImportGroups() {
   const groups = new Map();
@@ -1875,7 +2085,7 @@ function openTaskBuilderForIds(packageName,allIds,source) {
   const subjects=[...new Set(questions.map(q=>q.subject).filter(Boolean))].sort();
   const topics=[...new Set(questions.flatMap(q=>topicValues(q)))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
   const options=(values,label)=>`<option value="">${label}</option>${values.map(value=>`<option value="${safeAttr(value)}">${escapeHTML(value)}</option>`).join('')}`;
-  const body=`<div class="task-builder-intro"><b>${ids.length} questões disponíveis</b><span>${escapeHTML(packageName)}</span></div><label class="field-label">Nome da tarefa<input id="packageTaskTitle" maxlength="100" value="${safeAttr(`Pacote · ${packageName}`)}"/></label><div class="field-grid package-task-filters"><label><span>Modo de seleção</span><select id="packageTaskMode"><option value="all">Todas as questões disponíveis</option><option value="random">Quantidade aleatória</option><option value="manual">Selecionar manualmente</option></select></label><label><span>Área</span><select id="packageTaskArea">${options(areas,'Todas as áreas')}</select></label><label><span>Matéria</span><select id="packageTaskSubject">${options(subjects,'Todas as matérias')}</select></label><label><span>Assunto / subassunto</span><select id="packageTaskTopic">${options(topics,'Todos os assuntos')}</select></label><label><span>Dificuldade</span><select id="packageTaskDifficulty"><option value="">Todas</option><option>Fácil</option><option>Média</option><option>Difícil</option></select></label></div><label class="field-label hidden" id="packageTaskQuantityWrap"><span>Quantidade de questões aleatórias</span><input id="packageTaskQuantity" type="number" min="1" max="${ids.length}" value="${Math.min(20,ids.length)}"/></label><div class="task-manual-controls hidden" id="packageTaskManualControls"><div><b>Seleção manual</b><small id="packageTaskSelectionCount">0 selecionadas</small></div><div class="inline-actions"><button class="text-button" type="button" data-action="task-select-visible">Selecionar página</button><button class="text-button" type="button" data-action="task-clear-selection">Limpar seleção</button></div><div id="packageTaskQuestionList" class="task-question-list"></div><div class="task-list-pagination" id="packageTaskPagination"></div></div><label class="check-row"><input id="packageTaskShuffle" type="checkbox"/><span><b>Embaralhar a ordem das questões</b></span></label><div class="task-selection-summary" id="packageTaskSummary">Todas as questões do pacote serão incluídas.</div>`;
+  const body=`<div class="task-builder-intro"><b>${ids.length} questões disponíveis</b><span>${escapeHTML(packageName)}</span></div><label class="field-label">Nome da tarefa<input id="packageTaskTitle" maxlength="100" value="${safeAttr(`Pacote · ${packageName}`)}"/></label><div class="field-grid package-task-filters"><label><span>Modo de seleção</span><select id="packageTaskMode"><option value="all">Todas as questões disponíveis</option><option value="random">Quantidade aleatória</option><option value="manual">Selecionar manualmente</option></select></label><label><span>Área</span><select id="packageTaskArea">${options(areas,'Todas as áreas')}</select></label><label><span>Matéria</span><select id="packageTaskSubject">${options(subjects,'Todas as matérias')}</select></label><label><span>Assunto / subassunto</span><select id="packageTaskTopic">${options(topics,'Todos os assuntos')}</select></label><label><span>Dificuldade</span><select id="packageTaskDifficulty"><option value="">Todas</option><option>Fácil</option><option>Média</option><option>Difícil</option></select></label></div><label class="field-label hidden" id="packageTaskQuantityWrap"><span>Quantidade de questões aleatórias</span><input id="packageTaskQuantity" type="number" min="1" max="${ids.length}" value="${Math.min(20,ids.length)}"/></label><div class="task-manual-controls hidden" id="packageTaskManualControls"><div><b>Seleção manual</b><small id="packageTaskSelectionCount">0 selecionadas</small></div><div class="inline-actions"><button class="text-button" type="button" data-action="task-select-visible">Selecionar página</button><button class="text-button" type="button" data-action="task-clear-selection">Limpar seleção</button></div><div id="packageTaskQuestionList" class="task-question-list"></div><div class="task-list-pagination" id="packageTaskPagination"></div></div><label class="check-row"><input id="packageTaskShuffle" type="checkbox"/><span><b>Embaralhar a ordem das questões</b></span></label><div class="task-selection-summary" id="packageTaskSummary">Todas as questões do pacote serão incluídas.</div><div class="task-correction-settings"><b>Correção personalizada</b><label class="field-label">Momento da correção<select id="packageCorrectionMode"><option value="end">Somente ao final</option><option value="immediate">Após cada questão</option><option value="interval">A cada bloco de questões</option></select></label><label class="field-label hidden" id="packageCorrectionIntervalRow">Questões por bloco<input id="packageCorrectionInterval" type="number" min="2" max="100" value="5"/></label></div>`;
   openModal('Criar tarefa a partir do pacote',body,`<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button secondary" data-action="resolve-import-task">Resolver agora ↗</button><button class="button primary" data-action="save-import-task">Adicionar às tarefas</button>`,'GERADOR DE TAREFAS');
   renderImportTaskBuilder();
 }
@@ -1922,9 +2132,10 @@ async function saveImportTask(resolveNow=false) {
   const ids=resolveImportTaskIds(); if(!ids.length) return toast('Selecione ao menos uma questão para a tarefa.');
   const title=String($('#packageTaskTitle').value||'Tarefa de questões importadas').trim().slice(0,100)||'Tarefa de questões importadas';
   const source=state.importTaskDraft.source || {type:'package',packageKey:state.importTaskDraft.packageKey};
+  const correctionConfig = normalizeActivityConfig({ correctionMode: $('#packageCorrectionMode')?.value || 'end', correctionInterval: $('#packageCorrectionInterval')?.value || 5 });
   state.importTaskDraft=null; closeModal();
-  if(resolveNow) return createActivityFromIds(ids,title);
-  await createPendingTaskFromIds(ids,title,source);
+  if(resolveNow) return createActivityFromIds(ids,title,{...DEFAULT_ACTIVITY_CONFIG,...correctionConfig,strategy:'import'});
+  await createPendingTaskFromIds(ids,title,source,{...DEFAULT_ACTIVITY_CONFIG,...correctionConfig,strategy:'saved-task'});
 }
 function renderPendingTasks() {
   const pending=state.data.activities.filter(item=>item.status==='pending').sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt));
@@ -1934,9 +2145,9 @@ function renderPendingTasks() {
   $('#pendingTaskEmpty').classList.toggle('hidden',pending.length>0);
   $('#pendingTaskList').innerHTML=pending.map(task=>`<article class="pending-task-item"><div><b>${escapeHTML(task.title)}</b><small>${task.questionIds.length} questões · Criada em ${formatDate(task.createdAt,true)}</small><small>${escapeHTML(task.source?.type==='package'?'Origem: pacote importado':task.source?.type==='packages'?'Origem: seleção de pacotes':'Origem: recomendações de estudo')}</small></div><div class="inline-actions"><button class="button small primary" data-action="start-pending-task" data-id="${safeAttr(task.id)}">Resolver</button><button class="button small secondary" data-action="delete-pending-task" data-id="${safeAttr(task.id)}">Excluir</button></div></article>`).join('');
 }
-async function createPendingTaskFromIds(ids,title,source={type:'manual'}) {
+async function createPendingTaskFromIds(ids,title,source={type:'manual'}, config=null) {
   const validIds=orderQuestionIdsWithTextBaseGroups(ids, state.data.questions); if(!validIds.length) return toast('Nenhuma questão disponível para criar a tarefa.');
-  const task={id:makeId('activity'),title,questionIds:validIds,status:'pending',createdAt:nowISO(),source,config:{correctionMode:'end',showErrors:false,commentMode:'available',navigationMode:'free',timerEnabled:false,timerMinutes:90,negativeScoring:false,strategy:'saved-task'}};
+  const task={id:makeId('activity'),title,questionIds:validIds,status:'pending',createdAt:nowISO(),source,config:normalizeActivityConfig(config || activityConfigFromBuilder('saved-task'))};
   await putRecord(state.db,'activities',task); await refreshData(); pageNavigate('activity'); toast(`Tarefa adicionada com ${validIds.length} questões.`);
 }
 async function startPendingTask(id) {
@@ -2304,7 +2515,7 @@ async function commitImport() {
   }
 }
 
-async function createActivityFromIds(ids, title) {
+async function createActivityFromIds(ids, title, config = null) {
   const storedActivities = await getAll(state.db, 'activities');
   state.data.activities = storedActivities;
   const running = storedActivities.filter(item => item.status === 'running').sort((a,b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
@@ -2316,7 +2527,7 @@ async function createActivityFromIds(ids, title) {
     return;
   }
   const validIds = orderQuestionIdsWithTextBaseGroups(ids, state.data.questions); if (!validIds.length) return;
-  const activity = { id: makeId('activity'), title, questionIds: validIds, status: 'running', createdAt: nowISO(), startedAt: nowISO(), activeSince: nowISO(), elapsedSecs: 0, config: { correctionMode: 'end', showErrors: false, commentMode: 'available', navigationMode: 'free', timerEnabled: false, timerMinutes: 90, negativeScoring: false, strategy: 'import' } };
+  const activity = { id: makeId('activity'), title, questionIds: validIds, status: 'running', createdAt: nowISO(), startedAt: nowISO(), activeSince: nowISO(), elapsedSecs: 0, config: normalizeActivityConfig(config || activityConfigFromBuilder('import')) };
   await putRecord(state.db, 'activities', activity); state.currentActivity = activity; state.activityAnswers = new Map(); state.activityStart = Date.now(); await refreshData(); pageNavigate('activity');
 }
 
@@ -2655,7 +2866,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.8.2');
+  await setSetting(state.db, 'appVersion', '1.8.3');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2733,7 +2944,7 @@ function getTextPoint(root, offset) {
   }
   return null;
 }
-function wrapTextRange(root, start, end) {
+function wrapTextRange(root, start, end, color = '#F0C96B') {
   const startPoint = getTextPoint(root, start);
   const endPoint = getTextPoint(root, end);
   if (!startPoint || !endPoint || end <= start) return;
@@ -2742,13 +2953,46 @@ function wrapTextRange(root, start, end) {
   range.setEnd(endPoint.node, endPoint.offset);
   const mark = document.createElement('mark');
   mark.className = 'text-highlight';
+  mark.style.setProperty('--highlight-color', color);
   mark.appendChild(range.extractContents());
   range.insertNode(mark);
 }
-function applyTextMarks(root, marks = [], target = 'statement') {
+function applyTextMarks(root, marks = [], target = 'statement', color = '#F0C96B') {
   if (!root || !marks?.length) return;
   [...marks].filter(mark => (mark.target || 'statement') === target && Number.isFinite(mark.start) && Number.isFinite(mark.end) && mark.end > mark.start)
-    .sort((a,b) => b.start - a.start).forEach(mark => wrapTextRange(root, mark.start, mark.end));
+    .sort((a,b) => b.start - a.start).forEach(mark => wrapTextRange(root, mark.start, mark.end, color));
+}
+function toggleHighlightMarks(targetMarks, selected, target) {
+  const overlapsExisting = targetMarks.some(mark => selected.start < mark.end && selected.end > mark.start);
+  if (overlapsExisting) {
+    // A selection that touches an existing mark toggles that selected span off.
+    // Split a larger mark when necessary, so selecting the original passage again
+    // still removes it even if earlier overlapping marks were merged together.
+    const remaining = [];
+    for (const mark of targetMarks) {
+      if (selected.start >= mark.end || selected.end <= mark.start) {
+        remaining.push(mark);
+        continue;
+      }
+      if (mark.start < selected.start) remaining.push({ ...mark, end: selected.start, text: '' });
+      if (mark.end > selected.end) remaining.push({ ...mark, start: selected.end, text: '' });
+    }
+    return remaining;
+  }
+  // Merge adjacent/overlapping new marks so rendering never creates nested marks.
+  const ordered = [...targetMarks, { target, start: selected.start, end: selected.end, text: selected.text }]
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged = [];
+  for (const mark of ordered) {
+    const previous = merged[merged.length - 1];
+    if (previous && mark.start <= previous.end) {
+      previous.end = Math.max(previous.end, mark.end);
+      if (mark.text) previous.text = mark.text;
+    } else {
+      merged.push({ ...mark, target });
+    }
+  }
+  return merged;
 }
 let pendingTextSelection = null;
 let autoTextHighlightTimer = null;
@@ -2828,26 +3072,7 @@ async function toggleTextHighlight() {
   const marks = [...(old.highlights || [])];
   const target = selected.target || 'statement';
   const targetMarks = marks.filter(mark => (mark.target || 'statement') === target);
-  const exactIndex = targetMarks.findIndex(mark => mark.start === selected.start && mark.end === selected.end);
-  let updatedTargetMarks;
-  if (exactIndex >= 0) {
-    // Selecting the exact same marked passage again removes that highlight.
-    updatedTargetMarks = targetMarks.filter((_mark, index) => index !== exactIndex);
-  } else {
-    // Merge overlapping selections so repeated highlighting never creates nested marks.
-    const ordered = [...targetMarks, { target, start: selected.start, end: selected.end, text: selected.text }]
-      .sort((a, b) => a.start - b.start || a.end - b.end);
-    updatedTargetMarks = [];
-    for (const mark of ordered) {
-      const previous = updatedTargetMarks[updatedTargetMarks.length - 1];
-      if (previous && mark.start <= previous.end) {
-        previous.end = Math.max(previous.end, mark.end);
-        if (mark.text) previous.text = mark.text;
-      } else {
-        updatedTargetMarks.push({ ...mark, target });
-      }
-    }
-  }
+  const updatedTargetMarks = toggleHighlightMarks(targetMarks, selected, target);
   const otherMarks = marks.filter(mark => (mark.target || 'statement') !== target);
   const nextMarks = [...otherMarks, ...updatedTargetMarks].sort((a, b) => {
     const targetOrder = String(a.target || 'statement').localeCompare(String(b.target || 'statement'));
@@ -2861,14 +3086,16 @@ async function toggleTextHighlight() {
   if (root) {
     unobserveAssetImages(root);
     if (target === 'textBase') {
-      root.innerHTML = renderTextBaseContent(textBaseById(question.textBaseId), [question]);
+      const relatedQuestions = (state.currentActivity.questionIds || []).map(questionById)
+        .filter(item => item && item.textBaseId === question.textBaseId);
+      root.innerHTML = renderTextBaseContent(textBaseById(question.textBaseId), relatedQuestions.length ? relatedQuestions : [question]);
     } else {
       const holder = document.createElement('div');
       holder.innerHTML = renderQuestionComposition(question);
       const replacement = holder.querySelector(`[data-statement-for="${CSS.escape(selected.questionId)}"]`);
       root.innerHTML = replacement?.innerHTML ?? renderQuestionBodyContent(question);
     }
-    applyTextMarks(root, nextMarks, target);
+    applyTextMarks(root, nextMarks, target, getQuestionHighlightColor(question));
     hydrateAssetImages(root).catch(error => console.error('Falha ao recarregar imagens do enunciado:', error));
   }
   clearPendingTextSelection();
@@ -2877,6 +3104,7 @@ async function toggleTextHighlight() {
 async function toggleDimmedOption(questionId, option) {
   if (!state.currentActivity || state.currentActivity.status !== 'running') return;
   const old = state.activityAnswers.get(questionId) || { id: `${state.currentActivity.id}::${questionId}`, activityId: state.currentActivity.id, questionId, response: '' };
+  if (answerIsLocked(old, normalizeActivityConfig(state.currentActivity.config || {}))) return;
   const options = new Set(old.dimmedOptions || old.eliminatedOptions || []);
   const canonical = String(option).toUpperCase();
   if (options.has(canonical)) options.delete(canonical); else options.add(canonical);
@@ -2948,6 +3176,10 @@ document.addEventListener('click', async event => {
   if (reviewFilter) { state.reviewFilter = reviewFilter.dataset.reviewFilter; renderReviews(); return; }
   const bankPageButton = event.target.closest('[data-bank-page]');
   if (bankPageButton) { state.bankPage = Number(bankPageButton.dataset.bankPage) || 1; renderBank(); return; }
+  const confidenceButton = event.target.closest('[data-confidence-choice]');
+  if (confidenceButton) { await setConfidence(confidenceButton.dataset.confidenceQuestion, confidenceButton.dataset.confidenceChoice); return; }
+  const highlightColorButton = event.target.closest('[data-highlight-subject][data-highlight-color]');
+  if (highlightColorButton) { await saveHighlightColor(highlightColorButton.dataset.highlightSubject, highlightColorButton.dataset.highlightColor); return; }
   const actionButton = event.target.closest('[data-action]');
   if (!actionButton) return;
   const action = actionButton.dataset.action;
@@ -3003,6 +3235,8 @@ document.addEventListener('click', async event => {
     else if (action === 'restore-question-version') await restoreQuestionVersion(actionButton.dataset.id, Number(actionButton.dataset.versionIndex));
     else if (action === 'save-question-edit') await saveQuestionEdit(actionButton.dataset.id);
     else if (action === 'finish-activity') await finishActivity(false);
+    else if (action === 'confirm-answer') await confirmQuestionAnswer(actionButton.dataset.id);
+    else if (action === 'correct-batch') await correctActivityBatch(actionButton.dataset.batchIndex);
     else if (action === 'discard-activity') await discardCurrentActivity();
     else if (action === 'resume-activity') await resumeSavedActivity(actionButton.dataset.id);
     else if (action === 'delete-saved-activity') await deleteSavedActivity(actionButton.dataset.id);
@@ -3098,7 +3332,7 @@ document.addEventListener('change', async event => {
     if (item) { item.resolution = target.value; renderImportPreview(); }
     return;
   }
-  if (target.matches('[data-confidence]')) { await setConfidence(target.dataset.confidence, target.value); return; }
+
   if (target.matches('[data-statement-index]')) {
     const card = target.closest('[data-question-card]'); if (card) await saveQuestionResponse(card.dataset.questionCard); return;
   }
@@ -3112,9 +3346,10 @@ document.addEventListener('change', async event => {
   if (target.id === 'activityDifficulty' || target.id === 'includeSolved') renderActivityBuilder();
   if (target.id === 'timerEnabled') renderActivityBuilder();
   if (target.id === 'correctionMode') {
-    const correctionAtEnd = target.value === 'end';
-    $('#showErrors').disabled = correctionAtEnd;
-    if (correctionAtEnd) $('#showErrors').checked = false;
+    $('#correctionIntervalRow')?.classList.toggle('hidden', target.value !== 'interval');
+  }
+  if (target.id === 'packageCorrectionMode') {
+    $('#packageCorrectionIntervalRow')?.classList.toggle('hidden', target.value !== 'interval');
   }
 });
 
