@@ -1,5 +1,5 @@
 import { getAll } from './db.js';
-import { readZip } from './zip.js';
+import { readZip, writeZip } from './zip.js';
 
 const SUBJECT_AREA = {
   'Português': 'Linguagens', 'Literatura': 'Linguagens', 'Inglês': 'Linguagens', 'Espanhol': 'Linguagens', 'Artes': 'Linguagens', 'Educação Física': 'Linguagens',
@@ -547,6 +547,68 @@ export async function prepareQuestionImport(db, jsonFile, zipFile = null) {
     packageSource: packageMeta.source,
     totalQuestions: questions.length
   };
+}
+
+
+/**
+ * Reads a complete question package from one ZIP. The archive contains one
+ * schema JSON file and its referenced image files (or, for compatibility, a
+ * nested legacy images ZIP). Paths are made relative to the JSON's directory.
+ */
+export async function prepareQuestionImportFromArchive(db, archiveFile) {
+  if (!archiveFile || typeof archiveFile.arrayBuffer !== 'function') {
+    throw new Error('Selecione o ZIP completo do pacote.');
+  }
+  const archiveFiles = await readZip(archiveFile);
+  const jsonCandidates = [];
+  for (const [path, blob] of archiveFiles) {
+    if (!/\.json$/i.test(path)) continue;
+    let parsed;
+    try { parsed = JSON.parse(await blob.text()); } catch { continue; }
+    const version = String(parsed?.schemaVersion ?? parsed?.schema_version ?? '');
+    if (parsed && !Array.isArray(parsed) && Array.isArray(parsed.questions)
+      && ['1.0', '1.0.0', '2.0', '2.0.0'].includes(version)
+      && str(parsed.packageId ?? parsed.package_id)) {
+      jsonCandidates.push({ path, blob, parsed });
+    }
+  }
+  if (jsonCandidates.length !== 1) {
+    if (!jsonCandidates.length) throw new Error('O ZIP não contém um JSON de pacote Grafia válido. Inclua o arquivo JSON com schemaVersion, packageId e questions.');
+    throw new Error(`O ZIP contém ${jsonCandidates.length} JSONs de pacote válidos. Deixe apenas um arquivo de dados no ZIP.`);
+  }
+
+  const manifest = jsonCandidates[0];
+  const rootPrefix = manifest.path.includes('/') ? manifest.path.slice(0, manifest.path.lastIndexOf('/') + 1) : '';
+  const imageEntries = new Map();
+  const imageExt = /\.(?:png|jpe?g|webp|gif|svg)$/i;
+  const addImage = (path, blob) => {
+    let relative = String(path).replace(/\\/g, '/').replace(/^\.\//, '');
+    if (rootPrefix && relative.startsWith(rootPrefix)) relative = relative.slice(rootPrefix.length);
+    if (!relative || !imageExt.test(relative)) return;
+    if (imageEntries.has(relative)) throw new Error(`O ZIP contém duas imagens com o mesmo caminho: ${relative}`);
+    imageEntries.set(relative, blob);
+  };
+
+  for (const [path, blob] of archiveFiles) {
+    if (path === manifest.path || /\.json$/i.test(path)) continue;
+    if (/\.zip$/i.test(path)) {
+      const nested = await readZip(blob);
+      for (const [nestedPath, nestedBlob] of nested) addImage(nestedPath, nestedBlob);
+      continue;
+    }
+    addImage(path, blob);
+  }
+
+  const imagesZip = imageEntries.size
+    ? await writeZip([...imageEntries.entries()].map(([name, data]) => ({ name, data })))
+    : null;
+  const jsonName = manifest.path.split('/').pop() || 'pacote.json';
+  const jsonFile = new File([manifest.blob], jsonName, { type: 'application/json' });
+  const draft = await prepareQuestionImport(db, jsonFile, imagesZip);
+  draft.fileName = archiveFile.name || jsonName;
+  draft.imageFileName = imageEntries.size ? `${imageEntries.size} imagens incluídas no ZIP` : '';
+  draft.archiveFileName = archiveFile.name || jsonName;
+  return draft;
 }
 
 export function mergeQuestion(existing, incoming) {

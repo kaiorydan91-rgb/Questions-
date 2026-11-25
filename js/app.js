@@ -1,5 +1,5 @@
 import { openDB, getAll, getAllStoresSnapshot, getChangesSnapshot, getOne, putRecord, deleteRecord, deleteRecords, writeBatch, replaceAllData, mergeAllData, getSetting, setSetting, countAll } from './db.js';
-import { prepareQuestionImport, mergeQuestion, normalizeSearch } from './importer.js';
+import { prepareQuestionImport, prepareQuestionImportFromArchive, mergeQuestion, normalizeSearch } from './importer.js';
 import { readZip, writeZip, downloadBlob } from './zip.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -406,16 +406,20 @@ function orderQuestionIdsWithTextBaseGroups(ids, universe = state.data.questions
   return flattenQuestionUnits(buildQuestionUnits(selectedQuestions)).map(question => question.id);
 }
 function keepOnlyCompleteTextBaseGroups(candidates, scopeIds = (state.data.questions || []).map(q => q.id)) {
-  const candidateIds = new Set(candidates.map(question => question.id));
-  const scope = new Set(scopeIds.map(String));
-  const groups = textBaseGroups();
+  const candidateIds = new Set(candidates.map(question => String(question.id)));
+  const scope = new Set((scopeIds || []).map(String));
+  // Compare only with questions that belong to this task's source set. The old
+  // implementation compared against the entire bank and discarded valid groups
+  // whenever a sibling question lived in a different package.
+  const scopedQuestions = (state.data.questions || []).filter(question => scope.has(String(question.id)));
+  const groups = textBaseGroups(scopedQuestions);
   const blocked = new Set();
-  for (const [textBaseId, members] of groups) {
+  for (const members of groups.values()) {
     if (members.length < 2) continue;
-    const memberIds = members.map(question => question.id);
-    if (memberIds.some(id => !scope.has(id)) || memberIds.some(id => !candidateIds.has(id))) memberIds.forEach(id => blocked.add(id));
+    const memberIds = members.map(question => String(question.id));
+    if (memberIds.some(id => !candidateIds.has(id))) memberIds.forEach(id => blocked.add(id));
   }
-  return candidates.filter(question => !blocked.has(question.id));
+  return candidates.filter(question => !blocked.has(String(question.id)));
 }
 function weightedRandomUnits(units) {
   return units.map(unit => ({ unit, key: Math.pow(Math.random(), 1 / Math.max(.05, unit.weight || 1)) }))
@@ -1656,7 +1660,10 @@ function renderPackageHistory() {
     return `<article class="package-card"><div class="package-card-heading"><div class="package-card-title-wrap"><label class="package-select"><input type="checkbox" data-package-select="${safeAttr(group.key)}" ${state.selectedPackageKeys.has(group.key)?'checked':''}/><span>Incluir na seleção</span></label><span class="tag peach">${escapeHTML(group.status)}</span><h3>${escapeHTML(group.name)}</h3><p>${formatDate(group.latestAt || group.createdAt,true)} · ${group.ids.length} questões · ${imageQuestions} com imagens · ${group.records.length} ${group.records.length===1?'importação':'operações'}</p>${areaLabels.length?`<small>Áreas: ${escapeHTML(areaLabels.slice(0,3).join(', '))}${areaLabels.length>3?` +${areaLabels.length-3}`:''}</small>`:''}${subjectLabels.length?`<small>Matérias: ${escapeHTML(subjectLabels.slice(0,4).join(', '))}${subjectLabels.length>4?` +${subjectLabels.length-4}`:''}</small>`:''}${files?`<small>Arquivos: ${escapeHTML(files)}</small>`:''}<small>${shared?`${shared} questões compartilhadas com outros pacotes`:'Sem compartilhamento identificado entre pacotes'}</small></div><span class="package-icon">▤</span></div><div class="package-actions"><button class="button small secondary" data-action="package-details" data-package-key="${safeAttr(group.key)}">Ver questões</button><button class="button small primary" data-action="create-task-from-package" data-package-key="${safeAttr(group.key)}" ${group.ids.length?'':'disabled'}>Criar tarefa</button><button class="button small danger" data-action="delete-package" data-package-key="${safeAttr(group.key)}">Excluir pacote e questões</button></div></article>`;
   }).join('');
 }
-function findImportGroup(key) { return getImportGroups().find(group=>group.key===String(key)); }
+function findImportGroup(key) {
+  const value=String(key);
+  return getImportGroups().find(group=>group.key===value || group.records.some(record=>String(record.id)===value));
+}
 function openPackageDetails(key) {
   const group=findImportGroup(key); if(!group) return toast('Pacote não encontrado.');
   const rows=group.ids.map(id=>questionById(id)).filter(Boolean).map((question,index)=>`<article class="package-question-row"><span class="question-number">${index+1}</span><div><div class="question-meta"><span class="tag peach">${escapeHTML(question.subject||question.area)}</span><span class="tag">${escapeHTML(question.difficulty||'Sem nível')}</span></div><b>${escapeHTML(question.id)}</b><p>${escapeHTML(String(question.statement||'').slice(0,220))}${String(question.statement||'').length>220?'…':''}</p><small>${escapeHTML(question.primaryTopic||'Sem assunto')} · ${question.images?.length||0} imagens</small></div><button class="button small secondary" data-open-question="${safeAttr(question.id)}">Abrir</button></article>`).join('');
@@ -1886,7 +1893,8 @@ function renderImportTaskBuilder() {
   $('#packageTaskManualControls').classList.toggle('hidden',mode!=='manual');
   const max=candidates.length;
   const quantity=$('#packageTaskQuantity'); if(quantity){quantity.max=String(max);quantity.value=String(Math.min(Math.max(1,Number(quantity.value)||1),Math.max(1,max)));}
-  const selected=[...draft.selectedIds].filter(id=>draft.ids.includes(id));
+  const candidateIds=new Set(candidates.map(question=>question.id));
+  const selected=[...draft.selectedIds].filter(id=>candidateIds.has(id));
   $('#packageTaskSelectionCount').textContent=`${selected.length} questões selecionadas`;
   const units=buildQuestionUnits(candidates);
   const pageSize=30; const pageCount=Math.max(1,Math.ceil(units.length/pageSize)); draft.manualPage=Math.min(draft.manualPage,pageCount-1);
@@ -1949,7 +1957,13 @@ function importRecordQuestionIds(item) {
   const direct = Array.isArray(item?.questionIds) ? item.questionIds : [];
   const sourceExam = item?.packageId ? state.data.collections.find(collection => collection.type === 'sourceExam' && collection.packageId === item.packageId) : null;
   const fallback = sourceExam?.originalOrder?.length ? sourceExam.originalOrder : (sourceExam?.questionIds || []);
-  return [...new Set((direct.length ? direct : fallback).filter(id => Boolean(questionById(id))))];
+  const aliasMap = new Map((state.data.aliases || []).map(alias => [String(alias.alias), String(alias.questionId)]));
+  const resolveIds = values => [...new Set((values || []).map(value => {
+    if (value && typeof value === 'object') return String(value.id ?? value.questionId ?? value.question_id ?? '');
+    return String(value ?? '');
+  }).map(id => id.trim()).filter(Boolean).map(id => questionById(id) ? id : (aliasMap.get(id) || '')).filter(id => Boolean(questionById(id))))];
+  const resolvedDirect = resolveIds(direct);
+  return resolvedDirect.length ? resolvedDirect : resolveIds(fallback);
 }
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return '—';
@@ -2038,15 +2052,17 @@ async function saveQuestionEdit(id) {
 
 function openImportModal() {
   state.importDraft = null;
-  openModal('Importar pacote de questões', `<div class="modal-form"><div class="import-drop"><span class="empty-symbol">{ }</span><b>Arquivo de dados · obrigatório</b><small>Selecione o JSON preparado para o Grafia Questions.</small><input type="file" id="importJsonFile" accept=".json,application/json"></div><div class="import-drop"><span class="empty-symbol">▧</span><b>Arquivo de imagens · opcional</b><small>Selecione o ZIP que contém as imagens referenciadas pelo JSON.</small><input type="file" id="importZipFile" accept=".zip,application/zip"></div><label>Após importar<select id="importMode"><option value="bank">Adicionar ao banco</option><option value="solve">Importar e resolver agora</option></select></label><p class="fine-print">O JSON pode usar schemaVersion "2.0.0" (ou "1.0.0" para pacotes antigos). O formato 2.0 permite blocos de texto, poemas, listas, fórmulas, tabelas e alternativas com imagens. Se houver imagens, os identificadores e nomes dos arquivos precisam corresponder. A prévia apontará itens incompletos antes de salvar.</p><button class="button secondary" type="button" data-action="download-template">Baixar modelo JSON vazio</button><div id="importPreview"></div></div>`, `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" id="analyzeImport" type="button">Analisar pacote</button>`, 'IMPORTAÇÃO E VALIDAÇÃO');
+  openModal('Importar pacote de questões', `<div class="modal-form"><div class="import-drop import-drop-primary"><span class="empty-symbol">▣</span><b>Pacote completo · um único ZIP</b><small>O arquivo deve conter o JSON do pacote e, quando houver, as imagens referenciadas.</small><input type="file" id="importPackageFile" accept=".zip,application/zip"></div><details class="legacy-import"><summary>Usar arquivos separados de versões antigas</summary><div class="modal-form"><div class="import-drop"><b>JSON de questões</b><small>Arquivo de dados obrigatório.</small><input type="file" id="importJsonFile" accept=".json,application/json"></div><div class="import-drop"><b>ZIP de imagens</b><small>Opcional, quando o JSON referencia imagens.</small><input type="file" id="importZipFile" accept=".zip,application/zip"></div></div></details><label>Após importar<select id="importMode"><option value="bank">Adicionar ao banco</option><option value="solve">Importar e resolver agora</option></select></label><p class="fine-print">O pacote pode usar schemaVersion "2.0.0" ou "1.0.0". O ZIP único reúne os dados e as imagens, evitando selecionar arquivos de pacotes diferentes. A prévia aponta itens incompletos antes de salvar.</p><button class="button secondary" type="button" data-action="download-template">Baixar modelo JSON vazio</button><div id="importPreview"></div></div>`, `<button class="button secondary" data-action="close-modal">Cancelar</button><button class="button primary" id="analyzeImport" type="button">Analisar pacote</button>`, 'IMPORTAÇÃO E VALIDAÇÃO');
 }
 async function analyzeImport() {
-  const json = $('#importJsonFile')?.files?.[0];
+  const archive = $('#importPackageFile')?.files?.[0] || null;
+  const json = $('#importJsonFile')?.files?.[0] || null;
   const zip = $('#importZipFile')?.files?.[0] || null;
-  if (!json) return toast('Selecione o arquivo JSON de questões.');
+  if (archive && (json || zip)) return toast('Escolha o ZIP completo ou os arquivos separados; não misture os dois formatos.');
+  if (!archive && !json) return toast('Selecione o ZIP completo do pacote.');
   const analyze = $('#analyzeImport'); analyze.disabled = true; analyze.textContent = 'Analisando…';
   try {
-    // Parse JSON and ZIP in a module Worker so large packages do not freeze the interface.
+    // Large packages are processed in a Worker to keep the interface responsive.
     if (typeof Worker !== 'undefined') {
       state.importWorker?.terminate?.();
       const worker = new Worker('./js/import-worker.js', { type: 'module' });
@@ -2054,12 +2070,14 @@ async function analyzeImport() {
       const draft = await new Promise((resolve, reject) => {
         worker.onmessage = event => event.data?.ok ? resolve(event.data.draft) : reject(new Error(event.data?.error || 'Falha ao analisar o pacote.'));
         worker.onerror = event => reject(new Error(event.message || 'Falha no processamento em segundo plano.'));
-        worker.postMessage({ jsonFile: json, zipFile: zip });
+        worker.postMessage(archive ? { archiveFile: archive } : { jsonFile: json, zipFile: zip });
       });
       worker.terminate(); state.importWorker = null;
       state.importDraft = draft;
     } else {
-      state.importDraft = await prepareQuestionImport(state.db, json, zip);
+      state.importDraft = archive
+        ? await prepareQuestionImportFromArchive(state.db, archive)
+        : await prepareQuestionImport(state.db, json, zip);
     }
     state.importDraft.mode = $('#importMode').value;
     renderImportPreview();
@@ -2165,7 +2183,7 @@ function saveImportQuestion(id) {
 }
 function openImportModalShellForDraft() {
   const draft = state.importDraft;
-  openModal('Importar pacote de questões', `<div class="modal-form"><div class="import-drop"><b>${escapeHTML(draft.fileName)}</b></div><div class="import-drop"><b>${escapeHTML(draft.imageFileName || 'Nenhum ZIP selecionado')}</b></div><label>Após importar<select id="importMode"><option value="bank" ${draft.mode==='bank'?'selected':''}>Adicionar ao banco</option><option value="solve" ${draft.mode==='solve'?'selected':''}>Importar e resolver agora</option></select></label><div id="importPreview"></div></div>`, '', 'IMPORTAÇÃO E VALIDAÇÃO');
+  openModal('Importar pacote de questões', `<div class="modal-form"><div class="import-drop"><b>${escapeHTML(draft.fileName)}</b><small>${escapeHTML(draft.imageFileName || 'Pacote sem imagens')}</small></div><label>Após importar<select id="importMode"><option value="bank" ${draft.mode==='bank'?'selected':''}>Adicionar ao banco</option><option value="solve" ${draft.mode==='solve'?'selected':''}>Importar e resolver agora</option></select></label><div id="importPreview"></div></div>`, '', 'IMPORTAÇÃO E VALIDAÇÃO');
 }
 function buildReplacementQuestion(existing, incoming, packageName) {
   const stamp = nowISO();
@@ -2440,12 +2458,11 @@ async function exportQuestionPackage() {
   });
   const relatedExams = state.data.collections.filter(collection => collection.type === 'sourceExam' && (collection.questionIds || []).some(id => questions.some(q => q.id === id)));
   const pkg = { schemaVersion: '2.0.0', packageId: makeId('package'), packageName: 'Pacote exportado do Grafia Questions', generatedAt: nowISO(), source: { name: 'Grafia Questions', exportedAt: nowISO() }, ...(relatedExams.length === 1 ? { sourceExam: { title: relatedExams[0].title, description: relatedExams[0].description, questionIds: relatedExams[0].questionIds, originalOrder: relatedExams[0].originalOrder } } : {}), questions, textBases: state.data.textBases };
-  const jsonBlob = new Blob([JSON.stringify(pkg,null,2)], {type:'application/json'});
-  const zipBlob = entries.length ? await writeZip(entries) : null;
+  entries.unshift({ name: 'pacote.json', data: JSON.stringify(pkg,null,2) });
+  const packageBlob = await writeZip(entries);
   const stamp = Date.now();
-  downloadBlob(jsonBlob, `grafia-questions-${stamp}.json`);
-  if (zipBlob) downloadBlob(zipBlob, `grafia-questions-imagens-${stamp}.zip`);
-  toast(`Exportação preparada: JSON${entries.length ? ' e ZIP de imagens' : ''}.`);
+  downloadBlob(packageBlob, `grafia-questions-pacote-${stamp}.zip`);
+  toast(`Pacote único preparado: dados e ${assets.length} imagens.`);
 }
 async function downloadBackup(type) {
   try {
@@ -2634,7 +2651,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.7.3');
+  await setSetting(state.db, 'appVersion', '1.8.0');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');

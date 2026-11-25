@@ -1,11 +1,13 @@
 import { openDB } from './db.js';
-import { prepareQuestionImport } from './importer.js';
+import { prepareQuestionImport, prepareQuestionImportFromArchive } from './importer.js';
 
 self.addEventListener('message', async event => {
-  const { jsonFile, zipFile } = event.data || {};
+  const { archiveFile, jsonFile, zipFile } = event.data || {};
   try {
     const db = await openDB();
-    const draft = await prepareQuestionImport(db, jsonFile, zipFile || null);
+    const draft = archiveFile
+      ? await prepareQuestionImportFromArchive(db, archiveFile)
+      : await prepareQuestionImport(db, jsonFile, zipFile || null);
     self.postMessage({ ok: true, draft });
     db.close();
   } catch (error) {
