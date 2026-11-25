@@ -253,6 +253,10 @@ input[type=checkbox], input[type=radio] { accent-color: var(--red); }
 .import-drop b { color: var(--text); font-size: 12px; }
 .import-drop small { font-size: 9px; }
 .import-drop input { max-width: 100%; font-size: 10px; }
+.import-drop-primary { min-height: 132px; border-color: rgba(185,130,137,.55); background: linear-gradient(135deg, rgba(84,26,46,.24), rgba(84,26,46,.08)); }
+.legacy-import { padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(13,16,33,.18); }
+.legacy-import summary { cursor: pointer; color: var(--muted); font-size: 10px; font-weight: 700; }
+.legacy-import[open] summary { margin-bottom: 12px; color: var(--text); }
 .import-summary { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin: 12px 0; }
 .import-summary > div { padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: rgba(13,16,33,.3); }
 .import-summary strong { display: block; font: 22px var(--font-heading); }
