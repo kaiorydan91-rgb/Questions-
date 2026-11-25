@@ -1140,7 +1140,7 @@ async function renderSession() {
     const base = unit.textBaseId ? textBaseById(unit.textBaseId) : null;
     return renderActivityQuestionCard(q, index, { textBase: base, baseQuestions: unit.questions, showBase: Boolean(base && localIndex === 0) });
   }).join('')).join('');
-  const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${displayQuestions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${displayQuestions.length ? answered / displayQuestions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${cardsHtml}</div><aside class="exam-side"><section class="glass-card exam-nav-panel"><h3>Navegação</h3><div class="exam-number-grid" id="examNumberGrid">${displayQuestions.map((q,index) => { const answer = state.activityAnswers.get(q.id); const navAnswer = navigationResponseLabel(q, answer?.response); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${answer?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index + 1}${navAnswer ? `, resposta marcada ${safeAttr(navAnswer)}` : ''}"><span class="exam-number-index">${index + 1}</span>${navAnswer ? `<span class="exam-number-answer">${escapeHTML(navAnswer)}</span>` : ''}</button>`; }).join('')}</div></section><section class="glass-card exam-actions-panel"><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></section></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${displayQuestions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div><div id="textSelectionToolbar" class="text-selection-toolbar hidden"><button type="button" data-action="toggle-text-highlight">Grifar trecho</button></div></div>`;
+  const html = `<div class="exam-shell"><div class="exam-top"><div><div class="eyebrow">ATIVIDADE EM ANDAMENTO</div><div class="exam-title">${escapeHTML(activity.title)}</div><div class="exam-meta">${displayQuestions.length} questões · Salvamento automático local</div></div><div class="exam-meta" id="activityTimerDisplay">${activity.config.timerEnabled ? '⏱ 00:00' : 'Sem cronômetro'}</div></div><div class="exam-progress"><i id="examProgressBar" style="width:${displayQuestions.length ? answered / displayQuestions.length * 100 : 0}%"></i></div><div class="exam-layout"><div class="exam-questions">${cardsHtml}</div><aside class="exam-side"><section class="glass-card exam-nav-panel"><h3>Navegação</h3><div class="exam-number-grid" id="examNumberGrid">${displayQuestions.map((q,index) => { const answer = state.activityAnswers.get(q.id); const navAnswer = navigationResponseLabel(q, answer?.response); return `<button class="exam-number ${answerCount(q.id) ? 'answered' : ''} ${answer?.markedForReview ? 'review-mark' : ''}" data-jump="${safeAttr(q.id)}" type="button" aria-label="Questão ${index + 1}${navAnswer ? `, resposta marcada ${safeAttr(navAnswer)}` : ''}"><span class="exam-number-index">${index + 1}</span>${navAnswer ? `<span class="exam-number-answer">${escapeHTML(navAnswer)}</span>` : ''}</button>`; }).join('')}</div></section><section class="glass-card exam-actions-panel"><button class="button primary" data-action="finish-activity">Entregar atividade</button><button class="button secondary" data-action="exit-activity">Salvar e sair</button><button class="button danger" data-action="discard-activity">Descartar e criar outra</button></section></aside></div><div class="exam-bottom"><span class="exam-meta" id="examAnsweredCount">${answered} de ${displayQuestions.length} respondidas</span><button class="text-button" data-action="finish-activity">Entregar atividade ↗</button></div></div>`;
   unobserveAssetImages($('#activitySession'));
   $('#activitySession').innerHTML = html;
   $('.activity-layout').classList.add('hidden');
@@ -1912,7 +1912,11 @@ function resolveImportTaskIds() {
   if(mode==='manual') units=units.filter(unit=>unit.questions.every(q=>draft.selectedIds.has(q.id)));
   if(mode==='random') units=takeUnitsForQuestionCount(weightedRandomUnits(units), Math.min(Number($('#packageTaskQuantity').value)||1,candidates.length));
   if($('#packageTaskShuffle').checked) units=randomize(units);
-  return orderQuestionIdsWithTextBaseGroups(flattenQuestionUnits(units).map(q=>q.id), draft.ids);
+  // orderQuestionIdsWithTextBaseGroups expects question objects as its universe,
+  // not a list of IDs. Passing draft.ids (strings) made every lookup fail and
+  // left both "Adicionar às tarefas" and "Resolver agora" with an empty list.
+  const packageQuestions = draft.ids.map(id => questionById(id)).filter(Boolean);
+  return orderQuestionIdsWithTextBaseGroups(flattenQuestionUnits(units).map(q=>q.id), packageQuestions);
 }
 async function saveImportTask(resolveNow=false) {
   const ids=resolveImportTaskIds(); if(!ids.length) return toast('Selecione ao menos uma questão para a tarefa.');
@@ -2651,7 +2655,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.8.0');
+  await setSetting(state.db, 'appVersion', '1.8.2');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
@@ -2747,70 +2751,127 @@ function applyTextMarks(root, marks = [], target = 'statement') {
     .sort((a,b) => b.start - a.start).forEach(mark => wrapTextRange(root, mark.start, mark.end));
 }
 let pendingTextSelection = null;
-function hideTextSelectionToolbar() {
-  const toolbar = $('#textSelectionToolbar');
-  if (toolbar) toolbar.classList.add('hidden');
+let autoTextHighlightTimer = null;
+let applyingTextHighlight = false;
+function clearPendingTextSelection() {
+  if (autoTextHighlightTimer) {
+    clearTimeout(autoTextHighlightTimer);
+    autoTextHighlightTimer = null;
+  }
   pendingTextSelection = null;
 }
-function updateTextSelectionToolbar() {
+function captureTextSelection() {
   const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || !selection.rangeCount || !state.currentActivity || state.currentActivity.status !== 'running') return hideTextSelectionToolbar();
+  if (!selection || selection.isCollapsed || !selection.rangeCount || !state.currentActivity || state.currentActivity.status !== 'running') {
+    clearPendingTextSelection();
+    return;
+  }
   const range = selection.getRangeAt(0);
   const ancestor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
   const root = ancestor?.closest?.('.exam-stem, .base-content');
-  if (!root || !root.contains(range.startContainer) || !root.contains(range.endContainer)) return hideTextSelectionToolbar();
-  const selectedText = selection.toString().trim();
-  if (!selectedText) return hideTextSelectionToolbar();
+  if (!root || !root.contains(range.startContainer) || !root.contains(range.endContainer)) {
+    clearPendingTextSelection();
+    return;
+  }
+  const rawText = selection.toString();
+  const selectedText = rawText.trim();
+  if (!selectedText) {
+    clearPendingTextSelection();
+    return;
+  }
   const prefix = range.cloneRange();
   prefix.selectNodeContents(root);
   prefix.setEnd(range.startContainer, range.startOffset);
   const throughEnd = range.cloneRange();
   throughEnd.selectNodeContents(root);
   throughEnd.setEnd(range.endContainer, range.endOffset);
-  const start = prefix.toString().length;
-  const end = throughEnd.toString().length;
-  if (end <= start) return hideTextSelectionToolbar();
+  const leadingTrim = rawText.length - rawText.trimStart().length;
+  const trailingTrim = rawText.length - rawText.trimEnd().length;
+  const start = prefix.toString().length + leadingTrim;
+  const end = throughEnd.toString().length - trailingTrim;
+  if (end <= start) {
+    clearPendingTextSelection();
+    return;
+  }
   const card = root.closest('[data-question-card]');
   const questionId = card?.dataset.questionCard;
-  if (!questionId) return hideTextSelectionToolbar();
+  if (!questionId) {
+    clearPendingTextSelection();
+    return;
+  }
   const target = root.matches('.base-content') ? 'textBase' : 'statement';
-  const answer = state.activityAnswers.get(questionId) || {};
-  const marks = (answer.highlights || []).filter(mark => (mark.target || 'statement') === target);
-  const overlaps = marks.some(mark => start < mark.end && end > mark.start);
-  pendingTextSelection = { questionId, target, start, end, text: selectedText, remove: overlaps };
-  const toolbar = $('#textSelectionToolbar');
-  const button = toolbar?.querySelector('button');
-  if (!toolbar || !button) return;
-  button.textContent = overlaps ? 'Remover grifo' : 'Grifar trecho';
-  const rect = range.getBoundingClientRect();
-  const width = toolbar.offsetWidth || 150;
-  toolbar.style.left = `${Math.max(10, Math.min(window.innerWidth - width - 10, rect.left))}px`;
-  toolbar.style.top = `${Math.max(10, Math.min(window.innerHeight - 52, rect.bottom + 8))}px`;
-  toolbar.classList.remove('hidden');
+  pendingTextSelection = { questionId, target, start, end, text: selectedText };
+}
+function scheduleAutomaticTextHighlight() {
+  if (autoTextHighlightTimer) clearTimeout(autoTextHighlightTimer);
+  autoTextHighlightTimer = setTimeout(async () => {
+    autoTextHighlightTimer = null;
+    captureTextSelection();
+    if (!pendingTextSelection || applyingTextHighlight || !state.currentActivity || state.currentActivity.status !== 'running') return;
+    applyingTextHighlight = true;
+    try {
+      await toggleTextHighlight();
+    } catch (error) {
+      console.error('Falha ao salvar grifo automático:', error);
+      toast('Não foi possível salvar o grifo.');
+    } finally {
+      applyingTextHighlight = false;
+    }
+  }, 90);
 }
 async function toggleTextHighlight() {
   const selected = pendingTextSelection;
   if (!selected || !state.currentActivity) return;
   const question = questionById(selected.questionId);
-  if (!question) return hideTextSelectionToolbar();
+  if (!question) return clearPendingTextSelection();
   const old = state.activityAnswers.get(selected.questionId) || { id: `${state.currentActivity.id}::${selected.questionId}`, activityId: state.currentActivity.id, questionId: selected.questionId, response: '' };
   const marks = [...(old.highlights || [])];
   const target = selected.target || 'statement';
-  const nextMarks = selected.remove
-    ? marks.filter(mark => (mark.target || 'statement') !== target || !(selected.start < mark.end && selected.end > mark.start))
-    : [...marks, { target, start: selected.start, end: selected.end, text: selected.text }].sort((a,b) => a.start - b.start);
+  const targetMarks = marks.filter(mark => (mark.target || 'statement') === target);
+  const exactIndex = targetMarks.findIndex(mark => mark.start === selected.start && mark.end === selected.end);
+  let updatedTargetMarks;
+  if (exactIndex >= 0) {
+    // Selecting the exact same marked passage again removes that highlight.
+    updatedTargetMarks = targetMarks.filter((_mark, index) => index !== exactIndex);
+  } else {
+    // Merge overlapping selections so repeated highlighting never creates nested marks.
+    const ordered = [...targetMarks, { target, start: selected.start, end: selected.end, text: selected.text }]
+      .sort((a, b) => a.start - b.start || a.end - b.end);
+    updatedTargetMarks = [];
+    for (const mark of ordered) {
+      const previous = updatedTargetMarks[updatedTargetMarks.length - 1];
+      if (previous && mark.start <= previous.end) {
+        previous.end = Math.max(previous.end, mark.end);
+        if (mark.text) previous.text = mark.text;
+      } else {
+        updatedTargetMarks.push({ ...mark, target });
+      }
+    }
+  }
+  const otherMarks = marks.filter(mark => (mark.target || 'statement') !== target);
+  const nextMarks = [...otherMarks, ...updatedTargetMarks].sort((a, b) => {
+    const targetOrder = String(a.target || 'statement').localeCompare(String(b.target || 'statement'));
+    return targetOrder || a.start - b.start;
+  });
   const next = { ...old, highlights: nextMarks, updatedAt: nowISO() };
   await putRecord(state.db, 'answers', next);
   syncAnswerCache(next);
   const selector = target === 'textBase' ? `[data-textbase-for="${CSS.escape(selected.questionId)}"]` : `[data-statement-for="${CSS.escape(selected.questionId)}"]`;
   const root = $(selector);
   if (root) {
-    root.innerHTML = target === 'textBase'
-      ? richText(textBaseById(question.textBaseId)?.content || '')
-      : renderQuestionBodyContent(question);
+    unobserveAssetImages(root);
+    if (target === 'textBase') {
+      root.innerHTML = renderTextBaseContent(textBaseById(question.textBaseId), [question]);
+    } else {
+      const holder = document.createElement('div');
+      holder.innerHTML = renderQuestionComposition(question);
+      const replacement = holder.querySelector(`[data-statement-for="${CSS.escape(selected.questionId)}"]`);
+      root.innerHTML = replacement?.innerHTML ?? renderQuestionBodyContent(question);
+    }
     applyTextMarks(root, nextMarks, target);
+    hydrateAssetImages(root).catch(error => console.error('Falha ao recarregar imagens do enunciado:', error));
   }
-  hideTextSelectionToolbar();
+  clearPendingTextSelection();
   window.getSelection()?.removeAllRanges();
 }
 async function toggleDimmedOption(questionId, option) {
@@ -2842,7 +2903,7 @@ document.addEventListener('click', async event => {
   if (subjectChip) { const value = subjectChip.dataset.activitySubject; state.activityFilters.subjects = state.activityFilters.subjects.includes(value) ? state.activityFilters.subjects.filter(item => item !== value) : [...state.activityFilters.subjects, value]; renderActivityBuilder(); return; }
   const removeTopic = event.target.closest('[data-remove-activity-topic]');
   if (removeTopic) { const value = removeTopic.dataset.removeActivityTopic; state.activityFilters.topics = state.activityFilters.topics.filter(item => normalizeSearch(item) !== normalizeSearch(value)); renderActivityBuilder(); return; }
-  if (!event.target.closest('#textSelectionToolbar') && !event.target.closest('.exam-stem, .base-content')) hideTextSelectionToolbar();
+  if (!event.target.closest('.exam-stem, .base-content')) clearPendingTextSelection();
   const pageButton = event.target.closest('[data-page]');
   if (pageButton) { event.preventDefault(); pageNavigate(pageButton.dataset.page); return; }
   const bankTabButton = event.target.closest('[data-bank-tab]');
@@ -2945,7 +3006,6 @@ document.addEventListener('click', async event => {
     else if (action === 'discard-activity') await discardCurrentActivity();
     else if (action === 'resume-activity') await resumeSavedActivity(actionButton.dataset.id);
     else if (action === 'delete-saved-activity') await deleteSavedActivity(actionButton.dataset.id);
-    else if (action === 'toggle-text-highlight') await toggleTextHighlight();
     else if (action === 'exit-activity') await pauseCurrentActivity();
     else if (action === 'mark-review') await toggleReviewMark(actionButton.dataset.id);
     else if (action === 'new-activity') newActivityFromBuilder();
@@ -3077,7 +3137,6 @@ document.addEventListener('keydown', event => {
   }
 });
 document.addEventListener('pointerdown', event => {
-  if (event.target.closest?.('#textSelectionToolbar button')) { event.preventDefault(); return; }
   const option = event.target.closest?.('[data-hold-option][data-question-option]');
   if (!option || !state.currentActivity || state.currentActivity.status !== 'running') return;
   clearTimeout(state.longPressTimer);
@@ -3089,7 +3148,10 @@ document.addEventListener('pointerdown', event => {
     toggleDimmedOption(questionId, key).catch(error => { console.error(error); toast('Não foi possível marcar a alternativa.'); });
   }, 1000);
 });
-document.addEventListener('pointerup', event => { if (state.longPressPointerId === event.pointerId) { clearTimeout(state.longPressTimer); state.longPressTimer = null; state.longPressPointerId = null; } if (!event.target.closest?.('#textSelectionToolbar')) setTimeout(updateTextSelectionToolbar, 50); });
+document.addEventListener('pointerup', event => {
+  if (state.longPressPointerId === event.pointerId) { clearTimeout(state.longPressTimer); state.longPressTimer = null; state.longPressPointerId = null; }
+  if (event.target.closest?.('.exam-stem, .base-content')) scheduleAutomaticTextHighlight();
+});
 document.addEventListener('pointercancel', () => { clearTimeout(state.longPressTimer); state.longPressTimer = null; state.longPressPointerId = null; });
 document.addEventListener('pointerleave', event => { if (state.longPressPointerId === event.pointerId) { clearTimeout(state.longPressTimer); state.longPressTimer = null; state.longPressPointerId = null; } });
 document.addEventListener('click', event => {
@@ -3097,13 +3159,11 @@ document.addEventListener('click', event => {
     event.preventDefault(); event.stopImmediatePropagation(); state.longPressFiredAt = 0;
   }
 }, true);
-document.addEventListener('selectionchange', () => { if (state.currentActivity?.status === 'running') setTimeout(updateTextSelectionToolbar, 30); });
-document.addEventListener('touchend', event => { if (!event.target.closest?.('#textSelectionToolbar')) setTimeout(updateTextSelectionToolbar, 0); }, { passive: true });
-document.addEventListener('mousedown', event => { if (event.target.closest?.('#textSelectionToolbar button')) event.preventDefault(); });
+document.addEventListener('selectionchange', () => { if (state.currentActivity?.status === 'running') setTimeout(captureTextSelection, 25); });
+document.addEventListener('touchend', event => { if (event.target.closest?.('.exam-stem, .base-content')) scheduleAutomaticTextHighlight(); }, { passive: true });
+document.addEventListener('keyup', event => { if (event.target.closest?.('.exam-stem, .base-content') && !window.getSelection()?.isCollapsed) scheduleAutomaticTextHighlight(); });
 
 document.addEventListener('click', event => {
-  const selectionButton = event.target.closest('#textSelectionToolbar button');
-  if (selectionButton) { event.preventDefault(); return; }
   const amount = event.target.closest('#questionAmount button');
   if (amount) {
     $$('#questionAmount button').forEach(button=>button.classList.toggle('selected',button===amount));
