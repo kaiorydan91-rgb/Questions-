@@ -275,8 +275,8 @@ O importador continua aceitando o formato anterior com `statement`, `alternative
 - Links externos aceitam apenas HTTP e HTTPS.
 - Tipos de bloco não reconhecidos são sinalizados para revisão e não são executados como HTML.
 - Questões incompletas podem ser corrigidas ou removidas antes da importação.
-- O pacote usa JSON obrigatório e ZIP opcional; ZIP64 e ZIPs criptografados não são aceitos nesta versão.
+- O pacote pode ser distribuído em um único ZIP contendo um único JSON de pacote e os arquivos de imagem referenciados. O JSON pode ficar na raiz ou dentro de uma pasta; os caminhos relativos das imagens são preservados. Para compatibilidade, o importador também lê arquivos antigos com JSON e ZIP de imagens separados, além de pacotes únicos que contenham o ZIP de imagens aninhado. ZIP64 e ZIPs criptografados não são aceitos nesta versão.
 
 ## Limite desta atualização
 
-O schema 2.0.0 e seu renderizador permitem representar blocos explicitamente. O reconhecimento automático de PDFs, OCR, interpretação de layout e reconstrução por IA ainda não estão implementados dentro do site. Para importar um PDF com alta fidelidade, o processo de digitalização externo deve produzir o JSON 2.0.0 e o ZIP de imagens, seguido da validação do Grafia.
+O schema 2.0.0 e seu renderizador permitem representar blocos explicitamente. O reconhecimento automático de PDFs, OCR, interpretação de layout e reconstrução por IA ainda não estão implementados dentro do site. Para importar um PDF com alta fidelidade, o processo de digitalização externo deve produzir o JSON 2.0.0 e os arquivos de imagem, reunidos em um único ZIP para importação no Grafia.

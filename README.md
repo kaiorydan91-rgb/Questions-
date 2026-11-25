@@ -1,6 +1,16 @@
-# Grafia Questions — versão 1.7.3
+# Grafia Questions — versão 1.8.0
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
+
+
+## Atualização 1.8.0 — Pacote único e correções de atividades
+
+- Exportação de questões em um único ZIP com `pacote.json` e imagens referenciadas em `imagens/`.
+- Importação de ZIP único com JSON na raiz ou em subpasta, imagens diretas e ZIP de imagens aninhado de pacotes anteriores.
+- Compatibilidade mantida com a importação antiga de JSON e ZIP separados, agora em uma área recolhida para evitar confusão.
+- Corrigida a verificação de textos-base na seleção de tarefas: agora considera apenas as questões pertencentes ao pacote/conjunto selecionado, não todo o banco.
+- Reforçada a recuperação de questões do histórico por IDs diretos, aliases e coleção de prova vinculada.
+- Atualizada a versão do banco e o cache do Service Worker para forçar a instalação dos arquivos novos.
 
 ## Publicar no GitHub Pages
 
@@ -23,20 +33,17 @@ Não abra o `index.html` diretamente pelo gerenciador de arquivos para uso perma
 
 ## Importar questões
 
-O fluxo utiliza dois arquivos separados:
-
-1. JSON obrigatório (`schemaVersion: "2.0.0"`; pacotes `1.0.0` antigos continuam aceitos), com questões, alternativas, gabaritos, resoluções, classificação e referências às imagens.
-2. ZIP opcional com as imagens referenciadas no JSON.
+O fluxo principal utiliza um único ZIP, contendo um arquivo JSON de pacote (com `schemaVersion: "2.0.0"`; pacotes `1.0.0` antigos continuam aceitos) e os arquivos de imagem referenciados pelo JSON. A pasta e os caminhos das imagens são preservados dentro do ZIP. O importador também lê pacotes antigos que colocam o ZIP de imagens dentro do pacote principal, além de manter uma opção recolhida para importar JSON e ZIP separados.
 
 Consulte `SCHEMA_PACOTE.md` e `MODELO_PACOTE.json`. O schema 2.0.0 introduz blocos ordenados de conteúdo, comando estruturado e alternativas multimodais, mantendo a leitura de pacotes 1.0.0. O modelo começa com `questions: []`; não é um conjunto de questões fictícias. As imagens de resoluções gerais e de comentários individuais das alternativas usam o mesmo array `images` e o mesmo ZIP da importação; consulte as posições `explanation` e `alternative_explanation:A` no schema.
 
-A importação verifica a estrutura, IDs estáveis e únicos, referências de imagens, textos-base, correspondência entre área e matéria, questões incompletas e duplicatas. Um `assetId` já existente não pode ser reutilizado para outro arquivo de imagem: o conteúdo é comparado para impedir que questões antigas passem a apontar silenciosamente para uma imagem diferente. Um ID já existente com enunciado/alternativas diferentes bloqueia a importação para evitar mesclagem acidental. Para detectar questões iguais com IDs de imagens ou textos-base diferentes, a comparação também considera o conteúdo do enunciado e das alternativas; quando essa correspondência textual é usada, a importação exige uma decisão manual para evitar unir questões com figuras diferentes. Em cada duplicata, escolha enriquecer, manter a versão atual ou substituir pela versão importada, mesmo que ela tenha menos informações. A substituição preserva os IDs usados por atividades e respostas, mantém favoritos e histórico de respostas, guarda até cinco versões anteriores e permite restaurá-las na tela de detalhes da questão. Questões incompletas podem ser editadas ou removidas da importação. A análise de JSON e ZIP roda em um Web Worker quando o navegador oferece suporte, reduzindo o bloqueio da interface. A gravação ocorre em lotes de até 200 questões e 100 imagens. Se o navegador interromper a operação, reanalise o mesmo par JSON/ZIP para retomar por identificadores e deduplicação; esta versão ainda não usa um cursor de retomada formal. O ZIP é verificado por tamanho e CRC antes de os arquivos serem armazenados.
+A importação verifica a estrutura, IDs estáveis e únicos, referências de imagens, textos-base, correspondência entre área e matéria, questões incompletas e duplicatas. Um `assetId` já existente não pode ser reutilizado para outro arquivo de imagem: o conteúdo é comparado para impedir que questões antigas passem a apontar silenciosamente para uma imagem diferente. Um ID já existente com enunciado/alternativas diferentes bloqueia a importação para evitar mesclagem acidental. Para detectar questões iguais com IDs de imagens ou textos-base diferentes, a comparação também considera o conteúdo do enunciado e das alternativas; quando essa correspondência textual é usada, a importação exige uma decisão manual para evitar unir questões com figuras diferentes. Em cada duplicata, escolha enriquecer, manter a versão atual ou substituir pela versão importada, mesmo que ela tenha menos informações. A substituição preserva os IDs usados por atividades e respostas, mantém favoritos e histórico de respostas, guarda até cinco versões anteriores e permite restaurá-las na tela de detalhes da questão. Questões incompletas podem ser editadas ou removidas da importação. A análise do ZIP único, do JSON e das imagens roda em um Web Worker quando o navegador oferece suporte, reduzindo o bloqueio da interface. A gravação ocorre em lotes de até 200 questões e 100 imagens. Se o navegador interromper a operação, reanalise o mesmo ZIP completo (ou o par antigo JSON/ZIP) para retomar por identificadores e deduplicação; esta versão ainda não usa um cursor de retomada formal. O ZIP é verificado por tamanho e CRC antes de os arquivos serem armazenados.
 
 ## Backups
 
 - **Completo:** exporta banco, histórico, respostas, revisões, notas, coleções, configurações e imagens em um ZIP.
 - **Incremental:** exporta alterações posteriores ao último checkpoint. O checkpoint usa a sequência monotônica do diário interno do IndexedDB, não horário de relógio, para evitar perder alterações que ocorram no mesmo milissegundo. Faça um backup completo antes do primeiro incremental; o incremental só pode ser aplicado ao banco de origem correspondente e na sequência correta.
-- **Pacote de questões:** exporta um JSON e, quando necessário, um ZIP opcional de imagens.
+- **Pacote de questões:** exporta um único ZIP com `pacote.json` e todas as imagens referenciadas em `imagens/`.
 - **Restauração completa:** permite mesclar ou substituir. A substituição dispara antes o download de um backup de segurança e grava os dados em uma transação IndexedDB. Depois de criar qualquer backup, confirme que o arquivo foi salvo antes de avançar o checkpoint incremental; sem essa confirmação, as alterações continuam incluídas no próximo backup.
 
 ## Limites conhecidos das versões 1.5.x
@@ -184,7 +191,7 @@ A versão 1.6.4 adota a identidade visual Forest Glass aprovada: fundos verde-pr
 - Mantém a compatibilidade de leitura e exportação de conteúdo legado do schema 1.0.0.
 - Separa estrutura de dados e apresentação: os blocos são renderizados em uma composição editorial contínua, sem cartões individuais obrigatórios.
 - Restaura a identidade Classic Red Glass, substituindo o tema Forest/Cool Steel por fundos bordô e vermelho profundo com acentos crimson.
-- O reconhecimento de PDFs/OCR por IA não faz parte desta atualização: o importador continua recebendo JSON estruturado e ZIP opcional de imagens.
+- O reconhecimento de PDFs/OCR por IA não faz parte desta atualização: o importador continua recebendo pacotes estruturados em ZIP único (ou JSON com ZIP de imagens separado, para compatibilidade).
 
 
 ## Atualização 1.7.1 — Textos-base compartilhados
