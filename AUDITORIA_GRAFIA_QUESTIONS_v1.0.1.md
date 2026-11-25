@@ -45,3 +45,11 @@
 - Verificação de integridade estrutural do ZIP gerado (`unzip -t`).
 
 Esta auditoria descreve o código entregue nesta versão; ela não substitui testes em diferentes versões do Chrome/Android nem garante ausência absoluta de defeitos.
+
+
+## Verificação de atualização 1.8.2
+
+- Seleção de texto no enunciado/texto-base: commit automático após o gesto de seleção, sem ação intermediária.
+- Selecionar novamente o mesmo intervalo: remove somente o grifo idêntico; sobreposições parciais são unificadas.
+- Re-renderização após grifar: recompõe o conteúdo pela mesma função de composição da questão, preservando mídias e blocos.
+- Navegação numérica: grade com células fixas de 42 px e espaçamento de 7 px; tamanhos não dependem da largura da coluna.

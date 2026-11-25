@@ -1,7 +1,22 @@
-# Grafia Questions — versão 1.8.0
+# Grafia Questions — versão 1.8.2
+
+## Atualização 1.8.2 — Grifo automático e navegação compacta
+
+- Selecionar texto no enunciado ou no texto-base durante uma atividade grifa o trecho automaticamente, sem botão flutuante.
+- Selecionar novamente exatamente o mesmo trecho remove o grifo correspondente.
+- Grifos sobrepostos são mesclados para evitar marcações duplicadas ou aninhadas.
+- A atualização do grifo preserva os blocos estruturados, imagens, tabelas e equações do enunciado/texto-base.
+- Os botões numéricos da navegação usam dimensões uniformes e espaçamento fixo para evitar colisões em telas estreitas ou largas.
+- A versão do cache offline foi atualizada para 1.8.2.
+
 
 Aplicação web progressiva (PWA) para banco pessoal de questões e atividades, com armazenamento local no navegador. O projeto não contém questões de demonstração: o acervo começa vazio e é preenchido por importação.
 
+
+## Atualização 1.8.1 — Correção das ações do gerador de tarefas
+
+- Corrigido o universo de questões passado à função de ordenação do gerador: agora recebe os objetos completos do pacote em vez de IDs, permitindo que “Adicionar às tarefas” e “Resolver agora” recuperem as questões selecionadas.
+- Atualizados o identificador do aplicativo e o cache do Service Worker para garantir a entrega do JavaScript corrigido.
 
 ## Atualização 1.8.0 — Pacote único e correções de atividades
 
