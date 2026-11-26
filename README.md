@@ -1,4 +1,10 @@
-# Grafia Questions — versão 1.8.3
+# Grafia Questions — versão 1.8.4
+
+## Atualização 1.8.4 — Posicionamento de figuras após alternativas
+
+- Corrige o posicionamento de imagens com `position: "after_alternatives"` para que elas apareçam somente depois das alternativas, sem serem repetidas também junto ao enunciado.
+- Preserva o comportamento de imagens do enunciado, tabelas, fórmulas e figuras vinculadas a alternativas específicas.
+- Atualiza a identificação da versão e o cache da PWA para 1.8.4.
 
 ## Atualização 1.8.3 — Grifos por matéria e correção personalizada
 
