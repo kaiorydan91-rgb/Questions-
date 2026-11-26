@@ -1012,7 +1012,7 @@ function renderQuestionComposition(question) {
       .map(block => String(block.assetId ?? block.imageId ?? '')));
     const looseImages = (question.images || []).filter(image => {
       const position = String(image.position || '');
-      const belongsToOtherRegion = /^(?:alternative[_-]explanation|alternative[_-]comment|option|alternative|alternativa):/i.test(position);
+      const belongsToOtherRegion = /^(?:after[_-]alternatives|alternative[_-]explanation|alternative[_-]comment|option|alternative|alternativa)(?::|$)/i.test(position);
       return !usedAssets.has(String(image.assetId)) && !belongsToOtherRegion;
     });
     const legacyMedia = looseImages.map(image => renderSingleImage(question, image)).join('');
@@ -2866,7 +2866,7 @@ async function clearDatabase() {
   for (const store of STORES) tx.objectStore(store).clear();
   await new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error); tx.onerror=()=>reject(tx.error); });
   await setSetting(state.db, 'databaseId', crypto.randomUUID());
-  await setSetting(state.db, 'appVersion', '1.8.3');
+  await setSetting(state.db, 'appVersion', '1.8.4');
   state.currentActivity = null; state.activityAnswers.clear();
   clearAssetUrlCache();
   await refreshData(); pageNavigate('home'); toast('Dados locais removidos.');
